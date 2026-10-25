@@ -428,6 +428,7 @@ async function viewScreen(){
     <button class="kpi wide line" style="border:1px solid #e8ebf2;padding:11px 12px" data-edit="period:${pid}"><span class="grow"><small>الدخل ${tag(ch['period:'+pid])}</small><b class="num">${money(pe?.salary)}</b></span><small>✏️</small></button>
     <div class="kpi"><small>المصروف</small><b class="num">${money(S.actual)}</b></div><div class="kpi"><small>المتبقي</small><b class="num">${money(S.remaining)}</b></div>
     <div class="kpi"><small>المدفوع</small><b class="num">${money(S.paid)}</b></div><div class="kpi"><small>غير المدفوع</small><b class="num">${money(S.unpaid)}</b></div></div>
+   ${reportCard(CAT.reports?.[pid])}
    ${(rd.electricity?.[0]||rd.water?.[0])?`<div class="card"><div class="sub">الفواتير</div>${util('electricity',rd.electricity?.[0])}${util('water',rd.water?.[0])}
      <button class="btn soft" id="roofBtn" style="margin-top:10px">🧾 كشف الروف لهالشهر</button></div>`:''}
    <div class="card"><div class="seg"><button type="button" data-f="all" class="${VIEW.filter==='all'?'on':''}">كل المصاريف</button><button type="button" data-f="unpaid" class="${VIEW.filter==='unpaid'?'on':''}">غير المدفوع</button></div>
@@ -482,6 +483,21 @@ async function roofImage(s){
   g.fillStyle='#eef0ff';g.fillRect(30,y-20,W-60,80);g.fillStyle='#141b2d';g.font='700 30px Plex, sans-serif';g.textAlign='right';g.fillText('المطلوب من الروف',W-60,y+30);
   g.textAlign='left';g.direction='ltr';g.fillText(s.total,60,y+30);
   return new Promise(r=>c.toBlob(r,'image/png'));
+}
+// The closed month's report, as the computer worked it out.
+function reportCard(r){
+  if(!r)return '';const p=r.previous,arrow=(now,before,lowerGood=true)=>{if(!p||before==null)return '';const d=now-before;if(Math.abs(d)<0.005)return '';
+    return ` <small style="color:${(lowerGood?d<0:d>0)?'var(--green)':'var(--red)'}">${d>0?'↑':'↓'} ${money(Math.abs(d))}</small>`};
+  const nm=n=>({'Home electricity':'كهرباء البيت','Home water':'مياه البيت'}[n]||n);
+  const note=r.spend_ratio==null?'':`صرفت ${r.spend_ratio}% من الدخل`+(r.avg_ratio==null?'.':` — ${r.spend_ratio>r.avg_ratio+0.5?'أعلى من':r.spend_ratio<r.avg_ratio-0.5?'أقل من':'تقريباً نفس'} معدّل آخر ${r.avg_months} شهور (${r.avg_ratio}%).`);
+  return `<div class="card"><div class="sub">📋 تقرير الشهر</div>
+   <div class="line"><span class="grow"><span>المصروف${arrow(r.actual,p?.actual)}</span></span><b class="num">${money(r.actual)}</b></div>
+   <div class="line"><span class="grow"><span>المتبقي${arrow(r.remaining,p?.remaining,false)}</span></span><b class="num">${money(r.remaining)}</b></div>
+   ${note?`<p class="hint">${esc(note)}</p>`:''}
+   ${r.changes.length?`<div class="sub">أكبر التغييرات عن الشهر الماضي</div>${r.changes.map(x=>`<div class="line"><span class="grow"><span>${esc(nm(x.name))}</span></span><b style="color:${x.diff>0?'var(--red)':'var(--green)'}">${x.diff>0?'↑':'↓'} ${money(Math.abs(x.diff))}</b></div>`).join('')}`:''}
+   <div class="sub">أكبر 5 مصاريف</div>${r.top.map(x=>`<div class="line"><span class="grow"><span>${esc(x.name)}</span></span><b class="num">${money(x.actual)}</b></div>`).join('')}
+   <div class="line"><span class="grow"><span>حصة الروف</span></span><b class="num">${money(r.roof_total)}</b></div>
+   <div class="line"><span class="grow"><span>أقساط اندفعت هالشهر</span><small>الباقي بالإجمالي ${money(r.installments.left)}</small></span><b class="num">${money(r.installments.paid)}</b></div></div>`;
 }
 async function paymentsScreen(oid){
   const o=(CAT.obligations||[]).find(x=>String(x.id)===String(oid));if(!o)return;const ch=await pendingChanges();
