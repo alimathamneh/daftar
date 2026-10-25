@@ -222,15 +222,23 @@ async function computerOnline(tok,root){const f=(await driveFiles(tok,`name = '$
   return !!f&&Date.now()-Date.parse(f.modifiedTime)<150000}
 const readHead=async(tok,id)=>(await gapi(tok,`https://www.googleapis.com/drive/v3/files/${id}?alt=media`)).json();
 
-// Apply `entries` straight into the Drive copy. Returns {applied:[ids], failed:{id:reason}} or null when the computer is on.
-async function run(tok,entries,key){
-  const {root,folder,headId}=await locate(tok);
-  if(await computerOnline(tok,root))return null;
+async function openCopy(tok,headId,key){
   const head=await readHead(tok,headId);if(head.salt!==key.salt)throw new Error('كلمة التشفير على الآيفون مش نفس اللي بالبرنامج');
   const blob=new Uint8Array(await (await gapi(tok,`https://www.googleapis.com/drive/v3/files/${head.blob_id}?alt=media`)).arrayBuffer());
   if(hex(await crypto.subtle.digest('SHA-256',blob))!==head.sha256)throw new Error('النسخة على Drive مش سليمة');
   const SQL=await libs(),zip=await JSZip.loadAsync(await decryptBytes(key.raw,blob));
-  const db=new SQL.Database(await zip.file('database/home_system.db').async('uint8array')),s=new Store(db);
+  return {head,zip,db:new SQL.Database(await zip.file('database/home_system.db').async('uint8array'))}}
+// Computer off: the lists straight from the Drive copy (its own catalog is older). null when the computer is on.
+async function lists(tok,key,old){
+  const {root,headId}=await locate(tok);
+  if(await computerOnline(tok,root))return null;
+  const {db}=await openCopy(tok,headId,key);
+  try{return await catalogFrom(new Store(db),old)}finally{db.close()}}
+// Apply `entries` straight into the Drive copy. Returns {applied:[ids], failed:{id:reason}} or null when the computer is on.
+async function run(tok,entries,key){
+  const {root,folder,headId}=await locate(tok);
+  if(await computerOnline(tok,root))return null;
+  const {head,zip,db}=await openCopy(tok,headId,key),s=new Store(db);
   const actor=(s.one("SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1")||{}).id||null,home=new Home(s,zip,actor);
   db.create_function('home_event_id',()=>home.event);db.create_function('home_actor_id',()=>actor);
   const applied=[],failed={};
@@ -255,5 +263,5 @@ async function run(tok,entries,key){
   gapi(tok,`https://www.googleapis.com/drive/v3/files/${head.blob_id}`,{method:'DELETE'}).catch(()=>{});
   return {applied,failed,catalog};
 }
-window.Direct={run,calcElectric,calcWater,version,Store,Home,catalogFrom,libs};
+window.Direct={run,lists,calcElectric,calcWater,version,Store,Home,catalogFrom,libs};
 })();
