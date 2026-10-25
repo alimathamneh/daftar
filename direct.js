@@ -140,7 +140,7 @@ class Home{
     const name=(account.kind==='installment'?'Installment · ':'Debt payment · ')+account.name,cat=account.kind==='installment'?'Installments':'Debt Repayments',memo=`Linked payment #${paymentId} · ${p.notes||''}`;
     if(old){const e=this.s.one('SELECT period_id FROM expenses WHERE id=?',[old]);if(e&&this.locked(e.period_id))throw new Error('المصروف الأصلي بشهر مسكّر');
       this.s.run(`UPDATE expenses SET period_id=?,name=?,category=?,budget=?,actual=?,paid_amount=?,payment_date=?,due_date=?,status='Paid',notes=?,updated_at=? WHERE id=?`,[p.period_id,name,cat,p.amount,p.amount,p.amount,p.paid_on,p.paid_on,memo,nowIso(),old])}
-    else{const eid=this.s.run(`INSERT INTO expenses(period_id,category,name,budget,actual,status,sort_order,due_date,paid_amount,payment_date,notes,auto_calculated,source_type,created_at,updated_at) VALUES(?,?,?,?,?,'Paid',?,?,?,?,?,1,'obligation_payment',?,?)`,
+    else{const eid=this.s.run(`INSERT INTO expenses(period_id,category,name,budget,actual,status,sort_order,due_date,paid_amount,payment_date,notes,auto_calculated,source_type,created_at,updated_at) VALUES(?,?,?,?,?,'Paid',?,?,?,?,?,0,'obligation_payment',?,?)`,
       [p.period_id,cat,name,p.amount,p.amount,999,p.paid_on,p.amount,p.paid_on,memo,nowIso(),nowIso()]);this.s.run('UPDATE obligation_payments SET expense_id=? WHERE id=?',[eid,paymentId])}}
   addPayment(oid,d){const a=this.s.one('SELECT * FROM obligations WHERE id=?',[oid]);if(!a)throw new Error('الحساب مش موجود');if(a.status==='archived')throw new Error('الحساب مؤرشف');
     const c=this.checkPayment(a,d);const id=this.s.run('INSERT INTO obligation_payments(obligation_id,amount,paid_on,paid_by,notes,period_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',[oid,c.amount,c.paid_on,c.paid_by,c.notes,c.period_id,nowIso(),nowIso()]);
@@ -193,7 +193,7 @@ async function catalogFrom(s,old){
   const periods=await withV('period',s.all('SELECT id,period_date,status,salary,notes FROM periods ORDER BY period_date DESC LIMIT 12'));
   const expenses={},readings={},summary={};
   for(const p of periods){const k=String(p.id);
-    expenses[k]=await withV('expense',s.all('SELECT id,name,category,section,budget,actual,paid_amount,status,payment_date,notes,auto_calculated FROM expenses WHERE period_id=? ORDER BY sort_order,id',[p.id]));
+    expenses[k]=await withV('expense',s.all('SELECT id,name,category,section,budget,actual,paid_amount,status,payment_date,notes,0 AS auto_calculated FROM expenses WHERE period_id=? ORDER BY sort_order,id',[p.id]));
     readings[k]={electricity:await withV('electricity',s.all(`SELECT id,${EDITABLE.electricity.join(',')},status,apartment_amount,home_amount,car_amount,roof_amount,roof_consumption,roof_prev FROM electricity WHERE period_id=? ORDER BY record_date DESC,id DESC`,[p.id])),
       water:await withV('water',s.all(`SELECT id,${EDITABLE.water.join(',')},status,apartment_amount,roof_amount,roof_consumption,roof_prev FROM water WHERE period_id=? ORDER BY record_date DESC,id DESC`,[p.id]))};
     const actual=expenses[k].reduce((t,e)=>t+sf(e.actual),0),paid=expenses[k].reduce((t,e)=>t+Math.min(sf(e.paid_amount),sf(e.actual)),0);
@@ -228,6 +228,8 @@ async function openCopy(tok,headId,key){
   if(hex(await crypto.subtle.digest('SHA-256',blob))!==head.sha256)throw new Error('النسخة على Drive مش سليمة');
   const SQL=await libs(),zip=await JSZip.loadAsync(await decryptBytes(key.raw,blob));
   return {head,zip,db:new SQL.Database(await zip.file('database/home_system.db').async('uint8array'))}}
+// Nothing is automatic any more (same as the computer's start-up): every line is an ordinary expense.
+const unlockAll=db=>{db.run('UPDATE expenses SET auto_calculated=0 WHERE auto_calculated=1');db.run('UPDATE expense_template_items SET auto_calculated=0 WHERE auto_calculated=1')};
 // Computer off: the lists straight from the Drive copy (its own catalog is older). null when the computer is on.
 async function lists(tok,key,old){
   const {root,headId}=await locate(tok);
@@ -240,7 +242,7 @@ async function run(tok,entries,key){
   if(await computerOnline(tok,root))return null;
   const {head,zip,db}=await openCopy(tok,headId,key),s=new Store(db);
   const actor=(s.one("SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1")||{}).id||null,home=new Home(s,zip,actor);
-  db.create_function('home_event_id',()=>home.event);db.create_function('home_actor_id',()=>actor);
+  db.create_function('home_event_id',()=>home.event);db.create_function('home_actor_id',()=>actor);unlockAll(db);
   const applied=[],failed={};
   for(const e of entries){db.run('SAVEPOINT one');try{await home.apply(e);db.run('RELEASE one');applied.push(e.id)}catch(err){db.run('ROLLBACK TO one');db.run('RELEASE one');failed[e.id]=err.message}}
   if(!applied.length){db.close();return {applied,failed,catalog:null}}
