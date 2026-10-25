@@ -28,6 +28,8 @@ h1{font-size:21px;margin:0}h2{font-size:17px;margin:0 0 12px}
 .action{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:16px 14px;border-radius:18px;border:1px solid #e8ebf2;background:#fff;text-align:start;box-shadow:0 1px 2px rgba(16,24,40,.04)}
 .action b{font-size:15px}.action small{color:var(--muted);font-size:12px}
 .ai{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:20px}
+.syncbar{display:flex;align-items:center;gap:10px;background:#fff7e6;border:1px solid #f0d7aa;color:#8c5a0a;border-radius:14px;padding:10px 12px;margin-bottom:12px;font-size:13.5px;font-weight:600}
+.syncbar span{flex:1}.syncbar .btn{width:auto;min-height:38px;padding:6px 14px;font-size:13.5px}
 .a-view{grid-column:1/-1;flex-direction:row;align-items:center}.a-view .ai{background:#eef0ff}
 .kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
 .kpi{background:#fff;border:1px solid #e8ebf2;border-radius:14px;padding:11px 12px}.kpi small{display:block;color:var(--muted);font-size:12px}.kpi b{font-size:17px}
@@ -84,6 +86,7 @@ code{direction:ltr;unicode-bidi:isolate;background:#eef0f5;border-radius:6px;pad
     <div><h1>دفتر البيت</h1><small id="catInfo">—</small></div>
     <div style="display:flex;gap:8px;align-items:center"><span class="chip" id="net">متصل</span><button class="icon-btn" id="openSettings" aria-label="الإعدادات">⚙️</button></div>
   </div>
+  <div class="syncbar hidden" id="syncBar"><span id="syncText"></span><button class="btn" id="syncBtn"></button></div>
   <div class="actions">
     <button class="action a-exp" data-form="expense"><span class="ai">🧾</span><b>مصروف</b><small>جديد أو دفعة</small></button>
     <button class="action a-el" data-form="electricity"><span class="ai">⚡</span><b>قراءة كهرباء</b><small>مع صورة العداد</small></button>
@@ -155,6 +158,7 @@ async function takeRedirect(){if(!location.hash.includes('access_token')&&!locat
   if(h.get('error'))return toast('ما تم الربط مع Google: '+h.get('error'),true),null;
   if(!saved||saved.state!==h.get('state'))return toast('رد Google غير متوقع، جرّب مرة ثانية',true),null;
   await kvSet('token',{value:h.get('access_token'),exp:Date.now()+(Number(h.get('expires_in')||3000)-120)*1000});return saved.next||null}
+async function validToken(){const t=await kvGet('token');return t&&t.exp>Date.now()?t.value:null}
 async function token(next){const t=await kvGet('token');if(t&&t.exp>Date.now())return t.value;await signIn(next);return null}
 async function gapi(tok,url,opt={}){const r=await fetch(url,{...opt,headers:{Authorization:'Bearer '+tok,...(opt.headers||{})}});
   if(r.status===401){await kvDel('token');throw Object.assign(new Error('انتهت جلسة Google'),{reauth:true})}
@@ -167,32 +171,38 @@ async function inboxFolder(tok){const root=await findFolder(tok,'Home Monthly Sy
 
 // ---------- lists from the computer (encrypted catalog) ----------
 let CAT=null;
-async function refreshCatalog(){
-  if(!navigator.onLine)return toast('بدك إنترنت لتحديث القوائم',true);
-  const tok=await token('refresh');if(!tok)return;
+// silent: the automatic run — no Google page, no password prompt, no messages unless something arrived.
+async function refreshCatalog(silent=false){
+  if(!navigator.onLine)return silent?null:toast('بدك إنترنت لتحديث القوائم',true);
+  if(silent&&!(await kvGet('key')))return;
+  const tok=silent?await validToken():await token('refresh');if(!tok)return;
   try{
     const inbox=await inboxFolder(tok);
     const r=await gapi(tok,'https://www.googleapis.com/drive/v3/files?'+new URLSearchParams({q:`name = 'catalog-for-phone.json' and '${inbox}' in parents and trashed = false`,fields:'files(id,modifiedTime)',orderBy:'modifiedTime desc',pageSize:'1'}));
     const f=(await r.json()).files?.[0];if(!f)throw new Error('لسا ما في قوائم. اضغط "تحديث" من البرنامج عالكمبيوتر.');
     const wrap=await (await gapi(tok,`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`)).json();
     let key=await kvGet('key');
+    if(silent&&(!key||key.salt!==wrap.salt))return;
     if(!key||key.salt!==wrap.salt){const pass=prompt('اكتب كلمة تشفير المزامنة (نفس اللي بالبرنامج عالكمبيوتر):');if(!pass)return;
       toast('بجهّز المفتاح… لحظة');key={salt:wrap.salt,raw:await deriveRaw(pass,wrap.salt)}}
     let data;try{data=JSON.parse(new TextDecoder().decode(await decryptBytes(key.raw,b64d(wrap.payload))))}
     catch{await kvDel('key');throw new Error('كلمة التشفير غلط، جرّب مرة ثانية')}
-    await kvSet('key',key);await kvSet('catalog',data);CAT=data;renderHome();toast('تم تحديث القوائم ✓');
-  }catch(e){toast(e.message,true);if(e.reauth)signIn('refresh')}
+    const changed=!CAT||CAT.generated_at!==data.generated_at;
+    await kvSet('key',key);await kvSet('catalog',data);CAT=data;renderHome();if(!silent||changed)toast('تم تحديث القوائم ✓');
+  }catch(e){if(e.reauth){if(!silent)signIn('refresh');else renderHome()}else if(!silent)toast(e.message,true)}
 }
 
 // ---------- upload: one encrypted file per entry; the computer decides what to add ----------
 const blobB64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=()=>rej(r.error);r.readAsDataURL(b)});
-async function upload(){
+let uploading=false;
+async function upload(silent=false){
+  if(uploading)return;
   const pending=(await allEntries()).filter(e=>!e.uploaded_at);
-  if(!pending.length)return toast('ما في شي جديد للرفع');
-  if(!navigator.onLine)return toast('بدك إنترنت للرفع',true);
-  const key=await kvGet('key');if(!key)return toast('اضغط "تحديث القوائم" أول عشان تدخل كلمة التشفير',true);
-  const tok=await token('upload');if(!tok)return;
-  const btn=$('#uploadBtn');btn.disabled=true;let done=0;
+  if(!pending.length)return silent?null:toast('ما في شي جديد للرفع');
+  if(!navigator.onLine)return silent?null:toast('بدك إنترنت للرفع',true);
+  const key=await kvGet('key');if(!key)return silent?null:toast('اضغط "تحديث القوائم" أول عشان تدخل كلمة التشفير',true);
+  const tok=silent?await validToken():await token('upload');if(!tok)return renderHome();
+  uploading=true;const btn=$('#uploadBtn');btn.disabled=true;let done=0;
   try{
     const inbox=await inboxFolder(tok);
     for(const e of pending){
@@ -209,8 +219,14 @@ async function upload(){
       e.uploaded_at=new Date().toISOString();e.photo_count=(e.photos||[]).length;e.photos=[];await putEntry(e);done++;
     }
     toast(`تم رفع ${done} ✓ ضيفهم من البرنامج عالكمبيوتر`);
-  }catch(err){toast((done?`انرفع ${done}. `:'')+err.message,true);if(err.reauth)signIn('upload')}
-  finally{btn.disabled=false;renderHome()}
+  }catch(err){if(err.reauth&&silent){if(done)toast(`تم رفع ${done} ✓`)}else{toast((done?`انرفع ${done}. `:'')+err.message,true);if(err.reauth)signIn('upload')}}
+  finally{uploading=false;btn.disabled=false;renderHome()}
+}
+// Automatic: upload, then fresh lists — when the app opens, when the internet comes back, and right after saving.
+let lastAuto=0;
+async function autoSync(force=false){
+  if(!navigator.onLine||(!force&&Date.now()-lastAuto<20000))return;lastAuto=Date.now();
+  await upload(true);await refreshCatalog(true);
 }
 
 // ---------- months, lists and labels ----------
@@ -240,7 +256,7 @@ const numv=id=>{const v=val(id);return v===''?null:Number(v)};
 
 async function save(type,data,periodId){
   const e={id:crypto.randomUUID(),type,created_at:new Date().toISOString(),period_id:periodId?Number(periodId):null,period_label:periodId?periodLabel(periodId):'',data,photos:PHOTOS.map(p=>({blob:p.blob,name:p.name}))};
-  await putEntry(e);closeSheet();toast('انحفظ على الآيفون ✓');
+  await putEntry(e);closeSheet();toast(navigator.onLine?'انحفظ ✓ وبيترفع هلأ':'انحفظ على الآيفون ✓');autoSync(true);
 }
 
 function expenseForm(){
@@ -392,7 +408,7 @@ async function editRecord(kind,id){
   const back=()=>{kind==='payment'?paymentsScreen(rec._ob.id):viewScreen()};
   const queue=async(type,data)=>{if(old)await delEntry(old.id);
     await putEntry({id:crypto.randomUUID(),type,created_at:new Date().toISOString(),period_id:kind==='payment'?null:Number(kind==='period'?rec.id:VIEW.pid),period_label:periodLabel(VIEW.pid),
-      data:{kind,id:Number(id),v:rec.v,label,...data},photos:[]});toast(type==='delete'?'انحفظ طلب الحذف ✓ ارفعه لما يصير نت':'انحفظ التعديل ✓ ارفعه لما يصير نت');back()};
+      data:{kind,id:Number(id),v:rec.v,label,...data},photos:[]});toast(type==='delete'?'انحفظ طلب الحذف ✓':'انحفظ التعديل ✓');back();autoSync(true)};
   $('#eSave').onclick=()=>{const changes={};
     for(const [k,,t] of FORMS[kind]){const el=$('#e_'+k);if(!el||el.disabled)continue;let v=el.value.trim();if(t==='num')v=v===''?null:Number(v);if(t==='date'&&v==='')v=null;
       const before=rec[k]??null,same=t==='num'?(before===null?v===null:v!==null&&Math.abs(Number(before)-v)<0.0005):String(before??'').slice(0,t==='date'?10:undefined)===String(v??'');
@@ -425,6 +441,12 @@ async function renderHome(){
   const pending=list.filter(e=>!e.uploaded_at);
   $('#pendingInfo').textContent=pending.length?`${pending.length} بانتظار الرفع`:'';
   $('#uploadBtn').textContent=pending.length?`⬆️ ارفع على Drive (${pending.length})`:'⬆️ ارفع على Drive';
+  // Reminder when entries wait: a sign-in button if Google needs it, otherwise after two days.
+  const oldest=pending.reduce((m,e)=>Math.min(m,Date.parse(e.created_at)),Date.now()),tok=await validToken(),hasKey=!!(await kvGet('key'));
+  const needLogin=pending.length&&navigator.onLine&&hasKey&&!tok,stale=pending.length&&Date.now()-oldest>2*864e5;
+  $('#syncBar').classList.toggle('hidden',!(needLogin||stale));
+  $('#syncText').textContent=`عندك ${pending.length} ${pending.length===1?'تسجيل':'تسجيلات'} ما انرفعت`+(stale?' من أكثر من يومين':'');
+  $('#syncBtn').textContent=needLogin?'سجّل دخول للرفع':'ارفع هلأ';
   $('#catInfo').textContent=CAT?`القوائم من ${dmy(CAT.generated_at)}`:'لسا ما في قوائم — حدّثها من Drive';
   const title=e=>{const d=e.data||{};if(e.type==='edit'||e.type==='delete')return `${TYPES[e.type].name}: ${d.label||''}`;if(e.type==='expense')return `${d.mode==='pay'?'دفعة: ':''}${d.name||'مصروف'}`;if(e.type==='payment')return d.obligation_name||'دفعة قسط';return TYPES[e.type].name};
   const sub=e=>{const d=e.data||{};if(e.type==='edit')return esc(Object.keys(d.changes||{}).length+' حقول تغيّرت');if(e.type==='delete')return esc(KIND_AR[d.kind]||'');const amt=d.amount?money(d.amount):e.type==='electricity'?`رئيسي ${d.main_current??'—'}`:`روف ${d.roof_current??'—'}`;
@@ -439,11 +461,14 @@ addEventListener('online',net);addEventListener('offline',net);
 
 document.querySelectorAll('[data-form]').forEach(b=>b.onclick=()=>{if(!CAT)toast('ما في قوائم لسا. حدّثها من Drive لما يصير عندك نت.',true);
   ({expense:expenseForm,electricity:()=>readingForm('electricity'),water:()=>readingForm('water'),payment:paymentForm})[b.dataset.form]()});
-$('#openView').onclick=viewScreen;$('#uploadBtn').onclick=upload;$('#refreshBtn').onclick=refreshCatalog;$('#openSettings').onclick=openSettings;
+$('#openView').onclick=viewScreen;$('#uploadBtn').onclick=()=>upload();$('#syncBtn').onclick=()=>upload();
+addEventListener('online',()=>autoSync(true));
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')autoSync()});$('#refreshBtn').onclick=refreshCatalog;$('#openSettings').onclick=openSettings;
 
 (async()=>{
   net();CAT=await kvGet('catalog')||null;await renderHome();
-  const next=await takeRedirect();if(next==='upload')upload();else if(next==='refresh')refreshCatalog();
+  const next=await takeRedirect();if(next==='upload')await upload();else if(next==='refresh')await refreshCatalog();
+  autoSync(true);
   if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 })();
 </script>
