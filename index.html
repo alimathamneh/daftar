@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>دفتر البيت</title>
+<meta name="theme-color" content="#5b5cf0">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+@font-face{font-family:Plex;font-weight:400;src:url(fonts/ibm-plex-sans-arabic-arabic-400-normal.woff2) format("woff2");unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFC,U+200C-200E}
+@font-face{font-family:Plex;font-weight:700;src:url(fonts/ibm-plex-sans-arabic-arabic-600-normal.woff2) format("woff2");unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFC,U+200C-200E}
+@font-face{font-family:Plex;font-weight:400;src:url(fonts/ibm-plex-sans-arabic-latin-400-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+2000-206F}
+@font-face{font-family:Plex;font-weight:700;src:url(fonts/ibm-plex-sans-arabic-latin-600-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+2000-206F}
+:root{--bg:#f4f6fa;--card:#fff;--text:#141b2d;--muted:#6b7488;--border:#e6e9f0;--brand:#5b5cf0;--soft:#eef0ff;--green:#0c8459;--red:#c43a52;--amber:#bd700c}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:Plex,-apple-system,"SF Arabic",Tahoma,sans-serif;font-size:15px;line-height:1.55}
+body{padding:calc(14px + env(safe-area-inset-top)) 14px calc(24px + env(safe-area-inset-bottom))}
+button,input,select,textarea{font:inherit;color:inherit}
+h1{font-size:21px;margin:0}h2{font-size:17px;margin:0 0 12px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+.top small{display:block;color:var(--muted);font-size:12.5px}
+.chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 11px;font-size:12px;font-weight:700;background:#e6f6ef;color:var(--green)}
+.chip.off{background:#fff2df;color:var(--amber)}
+.icon-btn{width:42px;height:42px;border-radius:13px;border:1px solid var(--border);background:#fff;display:grid;place-items:center}
+.card{background:var(--card);border:1px solid #e8ebf2;border-radius:18px;padding:16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 2px 10px rgba(16,24,40,.035)}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.action{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:16px 14px;border-radius:18px;border:1px solid #e8ebf2;background:#fff;text-align:start;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.action b{font-size:15px}.action small{color:var(--muted);font-size:12px}
+.ai{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:20px}
+.a-exp .ai{background:#f1edff}.a-el .ai{background:#fff3df}.a-wa .ai{background:#e6f2ff}.a-pay .ai{background:#e6f6ef}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:46px;padding:10px 16px;border-radius:13px;border:0;font-weight:700;background:var(--brand);color:#fff;width:100%}
+.btn.white{background:#fff;color:var(--text);border:1px solid var(--border)}
+.btn.soft{background:var(--soft);color:#4646c9}
+.btn.danger{background:#fff1f3;color:var(--red)}
+.btn:disabled{opacity:.5}
+.row{display:flex;gap:10px}.row>*{flex:1;min-width:0}
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.field label{font-size:13px;font-weight:700;color:#4b5568}
+.field input,.field select,.field textarea{width:100%;min-height:46px;border:1px solid #dfe3ec;border-radius:12px;padding:10px 12px;background:#fff;font-size:16px}
+.field textarea{min-height:70px}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:#8f90f5;box-shadow:0 0 0 4px rgba(91,92,240,.14)}
+.hint{font-size:12.5px;color:var(--muted)}.warn{font-size:12.5px;color:var(--amber)}
+.seg{display:flex;background:#eef0f5;border-radius:12px;padding:4px;margin-bottom:12px}
+.seg button{flex:1;border:0;background:none;border-radius:9px;padding:8px;font-weight:700;font-size:13.5px;color:var(--muted)}
+.seg button.on{background:#fff;color:var(--text);box-shadow:0 1px 3px rgba(16,24,40,.1)}
+.check{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-weight:600}
+.check input{width:22px;height:22px;accent-color:var(--brand)}
+.photos{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.photos img{width:74px;height:74px;object-fit:cover;border-radius:12px;border:1px solid var(--border)}
+.ph{position:relative}.ph button{position:absolute;top:-6px;left:-6px;width:24px;height:24px;border-radius:50%;border:0;background:#141b2d;color:#fff;font-size:13px}
+.pick{display:flex;align-items:center;justify-content:center;gap:8px;min-height:74px;border:1.5px dashed #cdd3e1;border-radius:14px;color:#4b5568;font-weight:700;background:#fafbfd;margin-bottom:12px}
+.pick input{display:none}
+.list .it{display:flex;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid #eef1f5}
+.list .it:last-child{border-bottom:0}
+.it .ai{width:38px;height:38px;font-size:18px;flex:none}
+.it .grow{flex:1;min-width:0}.it b{display:block;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.it small{color:var(--muted);font-size:12px}
+.st{font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 9px;white-space:nowrap}
+.st.wait{background:#fff2df;color:var(--amber)}.st.done{background:#e6f6ef;color:var(--green)}
+.del{border:0;background:none;color:var(--red);font-size:20px;padding:4px 6px}
+.sheet{position:fixed;inset:0;background:var(--bg);overflow:auto;padding:calc(14px + env(safe-area-inset-top)) 14px calc(30px + env(safe-area-inset-bottom));z-index:10}
+.hidden{display:none!important}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#141b2d;color:#fff;border-radius:12px;padding:11px 16px;font-size:14px;z-index:20;max-width:calc(100vw - 32px);text-align:center;opacity:0;transition:.2s;pointer-events:none}
+.toast.show{opacity:1}.toast.err{background:#9d2438}
+.empty{color:var(--muted);text-align:center;padding:18px 0;font-size:13.5px}
+.num{direction:ltr;unicode-bidi:isolate;font-variant-numeric:tabular-nums}
+.steps{padding-inline-start:20px;margin:6px 0 12px;font-size:13.5px}.steps li{margin-bottom:6px}
+code{direction:ltr;unicode-bidi:isolate;background:#eef0f5;border-radius:6px;padding:1px 5px;font-size:12.5px;word-break:break-all}
+</style>
+</head>
+<body>
+<div id="home">
+  <div class="top">
+    <div><h1>دفتر البيت</h1><small id="catInfo">—</small></div>
+    <div style="display:flex;gap:8px;align-items:center"><span class="chip" id="net">متصل</span><button class="icon-btn" id="openSettings" aria-label="الإعدادات">⚙️</button></div>
+  </div>
+  <div class="actions">
+    <button class="action a-exp" data-form="expense"><span class="ai">🧾</span><b>مصروف</b><small>جديد أو دفعة</small></button>
+    <button class="action a-el" data-form="electricity"><span class="ai">⚡</span><b>قراءة كهرباء</b><small>مع صورة العداد</small></button>
+    <button class="action a-wa" data-form="water"><span class="ai">💧</span><b>قراءة مياه</b><small>مع صورة العداد</small></button>
+    <button class="action a-pay" data-form="payment"><span class="ai">💳</span><b>دفعة قسط</b><small>أو دين</small></button>
+  </div>
+  <div class="card">
+    <div class="row" style="align-items:center;margin-bottom:6px"><h2 style="margin:0">التسجيلات</h2><span class="hint" id="pendingInfo" style="text-align:left"></span></div>
+    <div class="list" id="list"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="uploadBtn">⬆️ ارفع على Drive</button>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn white" id="refreshBtn">🔄 تحديث القوائم من Drive</button></div>
+  </div>
+  <p class="hint" style="text-align:center">بتشتغل بدون نت. ارفع لما يصير عندك إنترنت، وبعدين ضيفهم من البرنامج عالكمبيوتر.</p>
+</div>
+
+<div class="sheet hidden" id="sheet"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+// ---------- small helpers ----------
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
+const money=v=>`${Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:3})} JOD`;
+const dmy=s=>{const p=String(s||'').slice(0,10).split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:'—'};
+function toast(msg,err=false){const t=$('#toast');t.textContent=msg;t.className='toast show'+(err?' err':'');clearTimeout(toast.t);toast.t=setTimeout(()=>t.className='toast',3200)}
+const TYPES={expense:{icon:'🧾',name:'مصروف',cls:'a-exp'},electricity:{icon:'⚡',name:'قراءة كهرباء',cls:'a-el'},water:{icon:'💧',name:'قراءة مياه',cls:'a-wa'},payment:{icon:'💳',name:'دفعة قسط',cls:'a-pay'}};
+
+// ---------- IndexedDB: entries (with photo blobs) and settings ----------
+const dbp=new Promise((res,rej)=>{const r=indexedDB.open('home-monthly-phone',1);
+  r.onupgradeneeded=()=>{r.result.createObjectStore('entries',{keyPath:'id'});r.result.createObjectStore('kv')};
+  r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+async function tx(store,mode,fn){const db=await dbp;return new Promise((res,rej)=>{const t=db.transaction(store,mode);const s=t.objectStore(store);const out=fn(s);t.oncomplete=()=>res(out&&'result' in out?out.result:out);t.onerror=()=>rej(t.error)})}
+const kvGet=k=>tx('kv','readonly',s=>s.get(k));
+const kvSet=(k,v)=>tx('kv','readwrite',s=>s.put(v,k));
+const kvDel=k=>tx('kv','readwrite',s=>s.delete(k));
+const allEntries=()=>tx('entries','readonly',s=>s.getAll());
+const putEntry=e=>tx('entries','readwrite',s=>s.put(e));
+const delEntry=id=>tx('entries','readwrite',s=>s.delete(id));
+// Ask Safari to keep this app's data even when the phone is short on space.
+navigator.storage?.persist?.().catch(()=>{});
+
+// ---------- encryption: the same format as the computer (PBKDF2-SHA256 600k + AES-GCM) ----------
+const HEADER=new TextEncoder().encode('HOME_MONTHLY_AESGCM_V1:');
+const b64e=bytes=>{let s='';const b=new Uint8Array(bytes);for(let i=0;i<b.length;i+=0x8000)s+=String.fromCharCode.apply(null,b.subarray(i,i+0x8000));return btoa(s)};
+const b64d=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+async function deriveRaw(pass,saltB64){const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveBits']);
+  return new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:b64d(saltB64),iterations:600000},base,256))}
+const aesKey=raw=>crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt','decrypt']);
+async function encryptBytes(raw,data){const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:HEADER},await aesKey(raw),data));
+  const out=new Uint8Array(HEADER.length+12+ct.length);out.set(HEADER);out.set(iv,HEADER.length);out.set(ct,HEADER.length+12);return out}
+async function decryptBytes(raw,data){const h=HEADER.length;if(new TextDecoder().decode(data.slice(0,h))!=='HOME_MONTHLY_AESGCM_V1:')throw new Error('format');
+  return new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:data.slice(h,h+12),additionalData:HEADER},await aesKey(raw),data.slice(h+12)))}
+
+// ---------- Google: sign in by redirect (works in Safari; the token lasts about an hour) ----------
+const SCOPE='https://www.googleapis.com/auth/drive.file';
+// Always the folder address (".../" not ".../index.html"), so it matches the one redirect URI saved in Google Cloud.
+const appUrl=()=>location.origin+location.pathname.replace(/index\.html$/,'');
+async function signIn(next){const cid=await kvGet('client_id');if(!cid){openSettings();return toast('حط رقم Google Client ID بالإعدادات أول',true)}
+  const state=crypto.getRandomValues(new Uint32Array(2)).join('-');await kvSet('oauth',{state,next});
+  location.href='https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({client_id:cid,redirect_uri:appUrl(),response_type:'token',scope:SCOPE,include_granted_scopes:'true',state})}
+async function takeRedirect(){if(!location.hash.includes('access_token')&&!location.hash.includes('error='))return null;
+  const h=new URLSearchParams(location.hash.slice(1));history.replaceState(null,'',appUrl());const saved=await kvGet('oauth');await kvDel('oauth');
+  if(h.get('error'))return toast('ما تم الربط مع Google: '+h.get('error'),true),null;
+  if(!saved||saved.state!==h.get('state'))return toast('رد Google غير متوقع، جرّب مرة ثانية',true),null;
+  await kvSet('token',{value:h.get('access_token'),exp:Date.now()+(Number(h.get('expires_in')||3000)-120)*1000});return saved.next||null}
+async function token(next){const t=await kvGet('token');if(t&&t.exp>Date.now())return t.value;await signIn(next);return null}
+async function gapi(tok,url,opt={}){const r=await fetch(url,{...opt,headers:{Authorization:'Bearer '+tok,...(opt.headers||{})}});
+  if(r.status===401){await kvDel('token');throw Object.assign(new Error('انتهت جلسة Google'),{reauth:true})}
+  if(!r.ok)throw new Error('Drive: '+r.status+' '+(await r.text()).slice(0,160));return r}
+const q=s=>s.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+async function findFolder(tok,name,parent){const query=`name = '${q(name)}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`+(parent?` and '${parent}' in parents`:'');
+  const r=await gapi(tok,'https://www.googleapis.com/drive/v3/files?'+new URLSearchParams({q:query,fields:'files(id,name)',pageSize:'10'}));return (await r.json()).files?.[0]?.id||null}
+async function inboxFolder(tok){const root=await findFolder(tok,'Home Monthly System');const inbox=root&&await findFolder(tok,'Phone Inbox',root);
+  if(!inbox)throw new Error('ما لقيت مجلد الآيفون على Drive. من البرنامج عالكمبيوتر افتح "من الآيفون" واضغط "تحديث" مرة أول.');return inbox}
+
+// ---------- lists from the computer (encrypted catalog) ----------
+let CAT=null;
+async function refreshCatalog(){
+  if(!navigator.onLine)return toast('بدك إنترنت لتحديث القوائم',true);
+  const tok=await token('refresh');if(!tok)return;
+  try{
+    const inbox=await inboxFolder(tok);
+    const r=await gapi(tok,'https://www.googleapis.com/drive/v3/files?'+new URLSearchParams({q:`name = 'catalog-for-phone.json' and '${inbox}' in parents and trashed = false`,fields:'files(id,modifiedTime)',orderBy:'modifiedTime desc',pageSize:'1'}));
+    const f=(await r.json()).files?.[0];if(!f)throw new Error('لسا ما في قوائم. اضغط "تحديث" من البرنامج عالكمبيوتر.');
+    const wrap=await (await gapi(tok,`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`)).json();
+    let key=await kvGet('key');
+    if(!key||key.salt!==wrap.salt){const pass=prompt('اكتب كلمة تشفير المزامنة (نفس اللي بالبرنامج عالكمبيوتر):');if(!pass)return;
+      toast('بجهّز المفتاح… لحظة');key={salt:wrap.salt,raw:await deriveRaw(pass,wrap.salt)}}
+    let data;try{data=JSON.parse(new TextDecoder().decode(await decryptBytes(key.raw,b64d(wrap.payload))))}
+    catch{await kvDel('key');throw new Error('كلمة التشفير غلط، جرّب مرة ثانية')}
+    await kvSet('key',key);await kvSet('catalog',data);CAT=data;renderHome();toast('تم تحديث القوائم ✓');
+  }catch(e){toast(e.message,true);if(e.reauth)signIn('refresh')}
+}
+
+// ---------- upload: one encrypted file per entry; the computer decides what to add ----------
+const blobB64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=()=>rej(r.error);r.readAsDataURL(b)});
+async function upload(){
+  const pending=(await allEntries()).filter(e=>!e.uploaded_at);
+  if(!pending.length)return toast('ما في شي جديد للرفع');
+  if(!navigator.onLine)return toast('بدك إنترنت للرفع',true);
+  const key=await kvGet('key');if(!key)return toast('اضغط "تحديث القوائم" أول عشان تدخل كلمة التشفير',true);
+  const tok=await token('upload');if(!tok)return;
+  const btn=$('#uploadBtn');btn.disabled=true;let done=0;
+  try{
+    const inbox=await inboxFolder(tok);
+    for(const e of pending){
+      btn.textContent=`⬆️ برفع ${done+1} من ${pending.length}…`;
+      const photos=[];for(const p of e.photos||[])photos.push({name:p.name,type:p.blob.type||'image/jpeg',data:await blobB64(p.blob)});
+      const body={id:e.id,type:e.type,created_at:e.created_at,period_id:e.period_id,period_label:e.period_label,device:'iPhone',data:e.data,photos};
+      const payload=b64e(await encryptBytes(key.raw,new TextEncoder().encode(JSON.stringify(body))));
+      const meta={name:`phone-${e.id}.json`,parents:[inbox],mimeType:'application/json'};
+      const boundary='hm'+Math.random().toString(36).slice(2);
+      const multipart=new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n`,
+        JSON.stringify({format:'home-monthly-phone-entry',id:e.id,payload}),`\r\n--${boundary}--`]);
+      await gapi(tok,'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+boundary},body:multipart});
+      // Keep a light copy for the list; the photos are on Drive now.
+      e.uploaded_at=new Date().toISOString();e.photo_count=(e.photos||[]).length;e.photos=[];await putEntry(e);done++;
+    }
+    toast(`تم رفع ${done} ✓ ضيفهم من البرنامج عالكمبيوتر`);
+  }catch(err){toast((done?`انرفع ${done}. `:'')+err.message,true);if(err.reauth)signIn('upload')}
+  finally{btn.disabled=false;renderHome()}
+}
+
+// ---------- months, lists and labels ----------
+function monthLabel(s){if(!s)return '—';const y0=+s.slice(0,4),m0=+s.slice(5,7),day=+s.slice(8,10),start=CAT?.month_start_day||25;let y=y0,m=m0;if(day>=start){m++;if(m>12){m=1;y++}}return `${String(m).padStart(2,'0')}/${y}`}
+const openPeriods=()=>(CAT?.periods||[]).filter(p=>p.status!=='closed');
+function periodSelect(id='fPeriod'){const ps=openPeriods();if(!ps.length)return `<div class="warn" style="margin-bottom:12px">ما في شهر مفتوح بالقوائم. حدّث القوائم من Drive، أو افتح شهر عالكمبيوتر.</div><input type="hidden" id="${id}" value="">`;
+  return `<div class="field"><label>الشهر</label><select id="${id}">${ps.map(p=>`<option value="${p.id}">${monthLabel(p.period_date)}</option>`).join('')}</select></div>`}
+const periodLabel=id=>{const p=(CAT?.periods||[]).find(x=>String(x.id)===String(id));return p?monthLabel(p.period_date):''};
+
+// ---------- photos: shrunk on the phone so uploads stay small ----------
+async function shrink(file){const url=URL.createObjectURL(file);try{const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url});
+  const max=1600,s=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));const c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*s);c.height=Math.round(img.naturalHeight*s);
+  c.getContext('2d').drawImage(img,0,0,c.width,c.height);return await new Promise(res=>c.toBlob(b=>res(b||file),'image/jpeg',.82))}catch{return file}finally{URL.revokeObjectURL(url)}}
+let PHOTOS=[];
+function photoBlock(label){return `<div class="field"><label>${label}</label><div class="photos" id="photoList"></div><label class="pick">📷 صوّر أو اختار صورة<input type="file" accept="image/*" multiple id="photoInput"></label></div>`}
+function drawPhotos(){const box=$('#photoList');if(!box)return;box.innerHTML=PHOTOS.map((p,i)=>`<span class="ph"><img src="${p.url}" alt=""><button type="button" data-rm="${i}">✕</button></span>`).join('');
+  box.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{URL.revokeObjectURL(PHOTOS[+b.dataset.rm].url);PHOTOS.splice(+b.dataset.rm,1);drawPhotos()})}
+function bindPhotos(){const inp=$('#photoInput');if(!inp)return;inp.onchange=async()=>{for(const f of inp.files){if(PHOTOS.length>=6){toast('بكفي 6 صور',true);break}const blob=await shrink(f);PHOTOS.push({blob,name:f.name||'photo.jpg',url:URL.createObjectURL(blob)})}inp.value='';drawPhotos()}}
+
+// ---------- forms ----------
+const sheet=$('#sheet');
+function openSheet(html){sheet.innerHTML=html;sheet.classList.remove('hidden');$('#home').classList.add('hidden');window.scrollTo(0,0)}
+function closeSheet(){PHOTOS.forEach(p=>URL.revokeObjectURL(p.url));PHOTOS=[];sheet.classList.add('hidden');sheet.innerHTML='';$('#home').classList.remove('hidden');renderHome()}
+const head=t=>`<div class="top"><h1>${t}</h1><button class="icon-btn" id="closeSheet" aria-label="رجوع">✕</button></div>`;
+const val=id=>($('#'+id)?.value||'').trim();
+const numv=id=>{const v=val(id);return v===''?null:Number(v)};
+
+async function save(type,data,periodId){
+  const e={id:crypto.randomUUID(),type,created_at:new Date().toISOString(),period_id:periodId?Number(periodId):null,period_label:periodId?periodLabel(periodId):'',data,photos:PHOTOS.map(p=>({blob:p.blob,name:p.name}))};
+  await putEntry(e);closeSheet();toast('انحفظ على الآيفون ✓');
+}
+
+function expenseForm(){
+  let mode='new';
+  openSheet(`${head('مصروف')}<div class="card">${periodSelect()}
+   <div class="seg"><button type="button" class="on" data-mode="new">مصروف جديد</button><button type="button" data-mode="pay">دفعة على مصروف</button></div>
+   <div id="newBox"><div class="field"><label>اسم المصروف</label><input id="fName" list="names" autocomplete="off"><datalist id="names">${(CAT?.names||[]).map(n=>`<option value="${esc(n.name)}">`).join('')}</datalist></div>
+     <div class="row"><div class="field"><label>الفئة</label><input id="fCat" list="cats" autocomplete="off"><datalist id="cats">${(CAT?.categories||[]).map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
+     <div class="field"><label>القسم</label><select id="fSection"><option value="auto">تلقائي</option><option value="apartment">الشقة</option><option value="car">السيارة</option><option value="roof">الروف</option></select></div></div></div>
+   <div id="payBox" class="hidden"><div class="field"><label>المصروف</label><select id="fExpense"></select></div></div>
+   <div class="row"><div class="field"><label>المبلغ (JOD)</label><input id="fAmount" type="number" inputmode="decimal" step="0.001"></div><div class="field"><label>التاريخ</label><input id="fDate" type="date" value="${today()}"></div></div>
+   <label class="check" id="paidRow"><input type="checkbox" id="fPaid" checked> دفعته</label>
+   <div class="field"><label>ملاحظات</label><input id="fNotes"></div>
+   ${photoBlock('صورة الفاتورة أو الوصل (اختياري)')}
+   <button class="btn" id="saveBtn">احفظ</button></div>`);
+  const fillExpenses=()=>{const list=(CAT?.expenses?.[val('fPeriod')]||[]).filter(x=>Number(x.actual)-Number(x.paid_amount||0)>0.0005);
+    $('#fExpense').innerHTML=list.length?list.map(x=>`<option value="${x.id}" data-rem="${(Number(x.actual)-Number(x.paid_amount||0)).toFixed(3)}">${esc(x.name)} — باقي ${money(Number(x.actual)-Number(x.paid_amount||0))}</option>`).join(''):'<option value="">ما في مصاريف عليها مبلغ باقي</option>';
+    if(mode==='pay'){const o=$('#fExpense').selectedOptions[0];if(o?.dataset.rem)$('#fAmount').value=o.dataset.rem}};
+  sheet.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;sheet.querySelectorAll('[data-mode]').forEach(x=>x.classList.toggle('on',x===b));
+    $('#newBox').classList.toggle('hidden',mode!=='new');$('#payBox').classList.toggle('hidden',mode!=='pay');$('#paidRow').classList.toggle('hidden',mode!=='new');fillExpenses()});
+  $('#fPeriod')?.addEventListener('change',fillExpenses);$('#fExpense').onchange=()=>{const o=$('#fExpense').selectedOptions[0];if(o?.dataset.rem)$('#fAmount').value=o.dataset.rem};
+  $('#fName').onchange=()=>{const n=(CAT?.names||[]).find(x=>x.name===val('fName'));if(n){if(!val('fCat'))$('#fCat').value=n.category||'';if(n.section)$('#fSection').value=n.section}};
+  bindPhotos();$('#closeSheet').onclick=closeSheet;
+  $('#saveBtn').onclick=()=>{const amount=numv('fAmount');if(!(amount>0))return toast('اكتب المبلغ',true);if(!val('fPeriod'))return toast('اختار الشهر',true);
+    if(mode==='new'){if(!val('fName'))return toast('اكتب اسم المصروف',true);
+      return save('expense',{mode:'new',name:val('fName'),category:val('fCat')||'أخرى',section:val('fSection'),amount,paid:$('#fPaid').checked,date:val('fDate'),notes:val('fNotes')},val('fPeriod'))}
+    const o=$('#fExpense').selectedOptions[0];if(!o?.value)return toast('اختار المصروف',true);
+    save('expense',{mode:'pay',expense_id:Number(o.value),name:o.textContent.split(' — ')[0],amount,date:val('fDate'),notes:val('fNotes')},val('fPeriod'))};
+}
+
+function readingForm(kind){
+  const el=kind==='electricity',last=el?CAT?.last_electricity:CAT?.last_water;
+  const prev=k=>last?.[k]!=null?`<span class="hint">السابقة: <span class="num">${last[k]}</span></span>`:'';
+  openSheet(`${head(el?'قراءة كهرباء':'قراءة مياه')}<div class="card">${periodSelect()}
+   <div class="row"><div class="field"><label>تاريخ القراءة</label><input id="fDate" type="date" value="${today()}"></div><div class="field"><label>تاريخ الفاتورة</label><input id="fBill" type="date" value="${today()}"></div></div>
+   ${el?`<div class="field"><label>العداد الرئيسي الحالي</label><input id="fMain" type="number" inputmode="decimal" step="0.001">${prev('main_current')}</div>
+   <div class="row"><div class="field"><label>عداد الروف الحالي</label><input id="fRoof" type="number" inputmode="decimal" step="0.001">${prev('roof_current')}</div>
+   <div class="field"><label>عداد السيارة الحالي</label><input id="fCar" type="number" inputmode="decimal" step="0.001">${prev('car_current')}</div></div>
+   <div class="row"><div class="field"><label>إجمالي الفاتورة (اختياري)</label><input id="fInvoice" type="number" inputmode="decimal" step="0.001"></div><div class="field"><label>الرسوم</label><input id="fFees" type="number" inputmode="decimal" step="0.001" value="0"></div></div>
+   <div class="field"><label>كيلومترات السيارة (اختياري)</label><input id="fKm" type="number" inputmode="decimal"></div>`
+   :`<div class="row"><div class="field"><label>عداد الروف الحالي</label><input id="fRoof" type="number" inputmode="decimal" step="0.001">${prev('roof_current')}</div>
+   <div class="field"><label>استهلاك الفاتورة (م³)</label><input id="fTotal" type="number" inputmode="decimal" step="0.001"></div></div>
+   <div class="field"><label>إجمالي الفاتورة (اختياري)</label><input id="fInvoice" type="number" inputmode="decimal" step="0.001"></div>`}
+   <div class="field"><label>ملاحظات</label><input id="fNotes"></div>
+   <div id="readWarn" class="warn" style="margin-bottom:10px"></div>
+   ${photoBlock('صور العدادات والفاتورة')}
+   <button class="btn" id="saveBtn">احفظ</button></div>`);
+  const check=()=>{const w=[];const lower=(id,k,n)=>{const v=numv(id);if(v!=null&&last?.[k]!=null&&v<Number(last[k]))w.push(`${n} أقل من القراءة السابقة`)};
+    if(el){lower('fMain','main_current','العداد الرئيسي');lower('fCar','car_current','عداد السيارة')}lower('fRoof','roof_current','عداد الروف');$('#readWarn').textContent=w.join(' · ')};
+  sheet.querySelectorAll('input[type=number]').forEach(i=>i.addEventListener('input',check));
+  bindPhotos();$('#closeSheet').onclick=closeSheet;
+  $('#saveBtn').onclick=()=>{if(!val('fPeriod'))return toast('اختار الشهر',true);
+    const data=el?{record_date:val('fDate'),bill_date:val('fBill'),main_current:numv('fMain'),roof_current:numv('fRoof'),car_current:numv('fCar'),invoice_amount:numv('fInvoice'),fees:numv('fFees')||0,car_km:numv('fKm'),notes:val('fNotes')}
+      :{record_date:val('fDate'),bill_date:val('fBill'),roof_current:numv('fRoof'),total_consumption:numv('fTotal'),invoice_amount:numv('fInvoice'),notes:val('fNotes')};
+    if(el&&data.main_current==null)return toast('اكتب قراءة العداد الرئيسي',true);
+    if(!el&&data.total_consumption==null&&data.roof_current==null)return toast('اكتب القراءة',true);
+    if(!PHOTOS.length&&!confirm('ما في صورة للعداد. تحفظ بدون صورة؟'))return;
+    save(kind,data,val('fPeriod'))};
+}
+
+function paymentForm(){
+  const obs=CAT?.obligations||[];
+  openSheet(`${head('دفعة قسط أو دين')}<div class="card">
+   ${obs.length?`<div class="field"><label>الحساب</label><select id="fOb">${obs.map(o=>`<option value="${o.id}" data-m="${o.monthly_amount||''}">${esc(o.name)} — باقي ${money(o.remaining)}</option>`).join('')}</select></div>`:'<div class="warn" style="margin-bottom:12px">ما في أقساط مفتوحة بالقوائم. حدّث القوائم من Drive.</div>'}
+   <div class="row"><div class="field"><label>المبلغ (JOD)</label><input id="fAmount" type="number" inputmode="decimal" step="0.001"></div><div class="field"><label>تاريخ الدفع</label><input id="fDate" type="date" value="${today()}"></div></div>
+   <label class="check"><input type="checkbox" id="fLink" checked> سجّلها كمصروف بالشهر</label>
+   <div id="linkBox">${periodSelect()}</div>
+   <div class="field"><label>ملاحظات</label><input id="fNotes"></div>
+   ${photoBlock('صورة الوصل (اختياري)')}
+   <button class="btn" id="saveBtn" ${obs.length?'':'disabled'}>احفظ</button></div>`);
+  const fill=()=>{const o=$('#fOb')?.selectedOptions[0];if(o?.dataset.m)$('#fAmount').value=o.dataset.m};fill();
+  $('#fOb')&&($('#fOb').onchange=fill);$('#fLink').onchange=()=>$('#linkBox').classList.toggle('hidden',!$('#fLink').checked);
+  bindPhotos();$('#closeSheet').onclick=closeSheet;
+  $('#saveBtn').onclick=()=>{const amount=numv('fAmount');if(!(amount>0))return toast('اكتب المبلغ',true);const o=$('#fOb').selectedOptions[0];
+    const link=$('#fLink').checked;if(link&&!val('fPeriod'))return toast('اختار الشهر',true);
+    save('payment',{obligation_id:Number(o.value),obligation_name:o.textContent.split(' — ')[0],amount,paid_on:val('fDate'),link_to_expenses:link,notes:val('fNotes')},link?val('fPeriod'):null)};
+}
+
+// ---------- settings ----------
+async function openSettings(){
+  const cid=await kvGet('client_id')||'',key=await kvGet('key');
+  openSheet(`${head('الإعدادات')}<div class="card"><h2>الربط مع Google</h2>
+   <div class="field"><label>Google Client ID (نوع Web)</label><input id="sCid" dir="ltr" value="${esc(cid)}" placeholder="....apps.googleusercontent.com"></div>
+   <p class="hint">رابط هالصفحة اللي لازم تحطه بـ Google: <code>${esc(appUrl())}</code></p>
+   <button class="btn" id="sSave">احفظ</button></div>
+   <div class="card"><h2>التشفير</h2><p class="hint">${key?'كلمة التشفير محفوظة على هالآيفون.':'لسا ما دخلت كلمة التشفير. بتنطلب أول مرة بتحدّث القوائم.'}</p>
+   <button class="btn white" id="sForget">انسَ كلمة التشفير</button></div>
+   <div class="card"><h2>تنظيف</h2><p class="hint">بيمسح التسجيلات اللي انرفعت من القائمة. اللي لسا ما انرفع ما بينمسح.</p><button class="btn danger" id="sClean">امسح المرفوع</button></div>`);
+  $('#closeSheet').onclick=closeSheet;
+  $('#sSave').onclick=async()=>{const v=val('sCid');if(v&&!v.endsWith('.apps.googleusercontent.com'))return toast('الرقم لازم يخلص بـ .apps.googleusercontent.com',true);await kvSet('client_id',v);await kvDel('token');toast('انحفظ ✓')};
+  $('#sForget').onclick=async()=>{await kvDel('key');toast('انمسحت كلمة التشفير من الآيفون');openSettings()};
+  $('#sClean').onclick=async()=>{const up=(await allEntries()).filter(e=>e.uploaded_at);for(const e of up)await delEntry(e.id);toast(`انمسح ${up.length}`)};
+}
+
+// ---------- home ----------
+async function renderHome(){
+  const list=(await allEntries()).sort((a,b)=>b.created_at.localeCompare(a.created_at));
+  const pending=list.filter(e=>!e.uploaded_at);
+  $('#pendingInfo').textContent=pending.length?`${pending.length} بانتظار الرفع`:'';
+  $('#uploadBtn').textContent=pending.length?`⬆️ ارفع على Drive (${pending.length})`:'⬆️ ارفع على Drive';
+  $('#catInfo').textContent=CAT?`القوائم من ${dmy(CAT.generated_at)}`:'لسا ما في قوائم — حدّثها من Drive';
+  const title=e=>{const d=e.data||{};if(e.type==='expense')return `${d.mode==='pay'?'دفعة: ':''}${d.name||'مصروف'}`;if(e.type==='payment')return d.obligation_name||'دفعة قسط';return TYPES[e.type].name};
+  const sub=e=>{const d=e.data||{};const amt=d.amount?money(d.amount):e.type==='electricity'?`رئيسي ${d.main_current??'—'}`:`روف ${d.roof_current??'—'}`;
+    const ph=(e.photos?.length||e.photo_count)?` · 📷 ${e.photos?.length||e.photo_count}`:'';return `<span class="num">${esc(amt)}</span>${e.period_label?' · '+esc(e.period_label):''}${ph}`};
+  $('#list').innerHTML=list.length?list.slice(0,40).map(e=>`<div class="it"><span class="ai ${TYPES[e.type].cls}" style="background:${{expense:'#f1edff',electricity:'#fff3df',water:'#e6f2ff',payment:'#e6f6ef'}[e.type]}">${TYPES[e.type].icon}</span>
+    <div class="grow"><b>${esc(title(e))}</b><small>${sub(e)}</small></div>${e.uploaded_at?'<span class="st done">انرفع ✓</span>':`<span class="st wait">بالآيفون</span><button class="del" data-del="${e.id}" aria-label="حذف">🗑</button>`}</div>`).join('')
+    :'<div class="empty">لسا ما سجّلت شي.</div>';
+  $('#list').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{if(confirm('تحذف هالتسجيل من الآيفون؟')){await delEntry(b.dataset.del);renderHome()}});
+}
+function net(){const on=navigator.onLine;$('#net').textContent=on?'متصل':'بدون نت';$('#net').classList.toggle('off',!on)}
+addEventListener('online',net);addEventListener('offline',net);
+
+document.querySelectorAll('[data-form]').forEach(b=>b.onclick=()=>{if(!CAT)toast('ما في قوائم لسا. حدّثها من Drive لما يصير عندك نت.',true);
+  ({expense:expenseForm,electricity:()=>readingForm('electricity'),water:()=>readingForm('water'),payment:paymentForm})[b.dataset.form]()});
+$('#uploadBtn').onclick=upload;$('#refreshBtn').onclick=refreshCatalog;$('#openSettings').onclick=openSettings;
+
+(async()=>{
+  net();CAT=await kvGet('catalog')||null;await renderHome();
+  const next=await takeRedirect();if(next==='upload')upload();else if(next==='refresh')refreshCatalog();
+  if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+})();
+</script>
+</body>
+</html>
