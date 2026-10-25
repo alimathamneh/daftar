@@ -266,6 +266,10 @@ async function upload(silent=false){
   }catch(err){if(err.reauth&&silent){if(done)toast(`تم رفع ${done} ✓`)}else{toast((done?`انرفع ${done}. `:'')+err.message,true);if(err.reauth)signIn('upload')}}
   finally{uploading=false;btn.disabled=false;renderHome()}
 }
+// Right after saving something: upload now; if the Google sign-in has run out, sign in again straight away
+// (the person just tapped Save, so going to Google is expected), and the upload continues on return.
+async function syncNow(){if(!navigator.onLine)return toast('انحفظ عالآيفون، وبيترفع لحاله أول ما يرجع النت');
+  if(await validToken())return autoSync(true);if(!(await kvGet('key')))return autoSync(true);await signIn('upload')}
 // Automatic: upload, then fresh lists — when the app opens, when the internet comes back, and right after saving.
 let lastAuto=0;
 async function autoSync(force=false){
@@ -337,7 +341,7 @@ const numv=id=>{const v=val(id);return v===''?null:Number(v)};
 
 async function save(type,data,periodId){
   const e={id:crypto.randomUUID(),type,created_at:new Date().toISOString(),period_id:periodId?Number(periodId):null,period_label:periodId?periodLabel(periodId):'',data,photos:PHOTOS.map(p=>({blob:p.blob,name:p.name}))};
-  await putEntry(e);closeSheet();toast(navigator.onLine?'انحفظ ✓ وبيترفع هلأ':'انحفظ على الآيفون ✓');autoSync(true);
+  await putEntry(e);closeSheet();toast(navigator.onLine?'انحفظ ✓ وبيترفع هلأ':'انحفظ على الآيفون ✓');syncNow();
 }
 
 function expenseForm(){
@@ -571,7 +575,7 @@ async function editRecord(kind,id){
   const back=()=>{kind==='payment'?paymentsScreen(rec._ob.id):viewScreen()};
   const queue=async(type,data)=>{if(old)await delEntry(old.id);
     await putEntry({id:crypto.randomUUID(),type,created_at:new Date().toISOString(),period_id:kind==='payment'?null:Number(kind==='period'?rec.id:VIEW.pid),period_label:periodLabel(VIEW.pid),
-      data:{kind,id:Number(id),v:rec.v,label,...data},photos:[]});toast(type==='delete'?'انحفظ طلب الحذف ✓':'انحفظ التعديل ✓');back();autoSync(true)};
+      data:{kind,id:Number(id),v:rec.v,label,...data},photos:[]});toast(type==='delete'?'انحفظ طلب الحذف ✓':'انحفظ التعديل ✓');back();syncNow()};
   $('#eSave').onclick=()=>{const changes={};
     for(const [k,,t] of FORMS[kind]){const el=$('#e_'+k);if(!el||el.disabled)continue;let v=el.value.trim();if(t==='num')v=v===''?null:Number(v);if(t==='date'&&v==='')v=null;
       const before=rec[k]??null,same=t==='num'?(before===null?v===null:v!==null&&Math.abs(Number(before)-v)<0.0005):String(before??'').slice(0,t==='date'?10:undefined)===String(v??'');
@@ -681,7 +685,7 @@ async function gasScreen(){
     await putEntry(mk('gas',{id:crypto.randomUUID().replace(/-/g,''),cylinder:cyl,swapped_on:day,price,by:MYNAME}));
     const pid=openPeriods()[0]?.id;
     if(price>0&&pid)await putEntry(mk('expense',{mode:'new',name:'غاز',category:'الاحتياجات',section:'apartment',amount:price,paid:true,date:day,notes:`جرة ${cyl}`},pid));
-    toast('انسجّل التبديل ✓');gasScreen();autoSync(true)};
+    toast('انسجّل التبديل ✓');gasScreen();syncNow()};
 }
 
 // In shopping-only mode the shopping list is the whole app.
