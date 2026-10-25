@@ -241,7 +241,7 @@ const blobB64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>r
 let uploading=false;
 async function upload(silent=false){
   if(uploading)return;
-  const pending=(await allEntries()).filter(e=>!e.uploaded_at);
+  const pending=(await allEntries()).filter(e=>!e.uploaded_at&&!e.rejected);
   if(!pending.length)return silent?null:toast('ما في شي جديد للرفع');
   if(!navigator.onLine)return silent?null:toast('بدك إنترنت للرفع',true);
   const key=await kvGet('key');if(!key)return silent?null:toast('اضغط "تحديث القوائم" أول عشان تدخل كلمة التشفير',true);
@@ -253,7 +253,10 @@ async function upload(silent=false){
       if(res){const now=new Date().toISOString();
         for(const e of pending)if(res.applied.includes(e.id)){e.uploaded_at=now;e.direct='applied';e.photo_count=(e.photos||[]).length;e.photos=[];await putEntry(e);direct++}
         if(res.catalog){CAT=res.catalog;await kvSet('catalog',CAT)}
-        list=pending.filter(e=>!res.applied.includes(e.id));
+        // A refusal here (closed month, paid above actual, changed meanwhile) would be refused on the computer too:
+        // it stays on the phone with the reason instead of waiting there for nothing.
+        for(const e of pending)if(res.failed[e.id]){e.rejected=res.failed[e.id];await putEntry(e)}
+        list=pending.filter(e=>!res.applied.includes(e.id)&&!res.failed[e.id]);
         if(direct)toast(`انحفظ بالبرنامج مباشرة ✓ (${direct})`+(list.length?` · ${list.length} رح يستنوا الكمبيوتر`:''));
         for(const [id,why] of Object.entries(res.failed))console.warn('direct',id,why)}
     }catch(err){if(err.reauth)throw err;toast('ما قدرت أعدّل مباشرة ('+err.message+')، رح يوصل عن طريق الكمبيوتر',true)}
@@ -587,9 +590,13 @@ async function editRecord(kind,id){
       data:{kind,id:Number(id),v:rec.v,label,...data},photos:[]});toast(type==='delete'?'انحفظ طلب الحذف ✓':'انحفظ التعديل ✓');back();syncNow()};
   $('#eSave').onclick=()=>{const changes={};
     for(const [k,,t] of FORMS[kind]){const el=$('#e_'+k);if(!el||el.disabled)continue;let v=el.value.trim();if(t==='num')v=v===''?null:Number(v);if(t==='date'&&v==='')v=null;
-      const before=rec[k]??null,same=t==='num'?(before===null?v===null:v!==null&&Math.abs(Number(before)-v)<0.0005):String(before??'').slice(0,t==='date'?10:undefined)===String(v??'');
+      const before=t==='section'?(rec[k]||'auto'):rec[k]??null,same=t==='num'?(before===null?v===null:v!==null&&Math.abs(Number(before)-v)<0.0005):String(before??'').slice(0,t==='date'?10:undefined)===String(v??'');
       if(!same)changes[k]=v}
     if(!Object.keys(changes).length)return old?toast('ما في تغيير جديد'):toast('ما غيّرت شي');
+    // The same rule as the program: paid can't be more than actual (an empty actual takes the budget when Paid).
+    if(kind==='expense'){const after={...rec,...changes};let actual=Number(after.actual||0);const paid=Number(after.paid_amount||0);
+      if(after.status==='Paid'&&actual<=0&&!rec.auto_calculated)actual=Number(after.budget||0);
+      if(paid>actual+.001)return toast(`المدفوع (${paid}) أكبر من الفعلي (${actual})${rec.auto_calculated?' — الفعلي محسوب من القراءة وما بيتغيّر':''}`,true)}
     queue('edit',{changes,before:Object.fromEntries(Object.keys(changes).map(k=>[k,rec[k]??null]))})};
   $('#eDel')&&($('#eDel').onclick=()=>{if(confirm(`تحذف "${label}"؟ الحذف بيصير عالكمبيوتر لما توافق عليه هناك.`))queue('delete',{before:{}})});
   $('#eUndo')&&($('#eUndo').onclick=async()=>{await delEntry(old.id);toast('انلغى الطلب');back()});
@@ -730,7 +737,7 @@ async function openSettings(){
 
 // ---------- home ----------
 // What the computer did with an entry (sent with the lists): waiting, added, ignored.
-function phoneState(e){if(!e.uploaded_at)return '<span class="st wait">بالآيفون</span>';if(e.direct==='applied')return '<span class="st done">انضاف ✓</span>';
+function phoneState(e){if(e.rejected)return '<span class="st no">ما انضاف</span>';if(!e.uploaded_at)return '<span class="st wait">بالآيفون</span>';if(e.direct==='applied')return '<span class="st done">انضاف ✓</span>';
   const s=CAT?.inbox?.[e.id];return s==='applied'?'<span class="st done">انضاف ✓</span>':s==='dismissed'?'<span class="st no">متجاهَل</span>':'<span class="st part">بانتظار الكمبيوتر</span>'}
 // Entries deleted on the computer leave the phone too.
 async function dropDeleted(){const ib=CAT?.inbox||{};for(const e of await allEntries())if(e.uploaded_at&&ib[e.id]==='deleted')await delEntry(e.id)}
@@ -749,7 +756,7 @@ async function renderHome(){
   $('#syncBtn').textContent=needLogin?'سجّل دخول للرفع':'ارفع هلأ';
   $('#catInfo').textContent=CAT?`القوائم من ${dmy(CAT.generated_at)}`:'لسا ما في قوائم — حدّثها من Drive';
   const title=e=>{const d=e.data||{};if(e.type==='edit'||e.type==='delete')return `${TYPES[e.type].name}: ${d.label||''}`;if(e.type==='expense')return `${d.mode==='pay'?'دفعة: ':''}${d.name||'مصروف'}`;if(e.type==='payment')return d.obligation_name||'دفعة قسط';return TYPES[e.type].name};
-  const sub=e=>{const d=e.data||{};if(e.type==='gas')return esc(`${d.cylinder} · ${dmy(d.swapped_on)}`);if(e.type==='edit')return esc(Object.keys(d.changes||{}).length+' حقول تغيّرت');if(e.type==='delete')return esc(KIND_AR[d.kind]||'');const amt=d.amount?money(d.amount):e.type==='electricity'?`رئيسي ${d.main_current??'—'}`:`روف ${d.roof_current??'—'}`;
+  const sub=e=>{const d=e.data||{};if(e.rejected)return `<span style="color:var(--red)">${esc(e.rejected)}</span>`;if(e.type==='gas')return esc(`${d.cylinder} · ${dmy(d.swapped_on)}`);if(e.type==='edit')return esc(Object.keys(d.changes||{}).length+' حقول تغيّرت');if(e.type==='delete')return esc(KIND_AR[d.kind]||'');const amt=d.amount?money(d.amount):e.type==='electricity'?`رئيسي ${d.main_current??'—'}`:`روف ${d.roof_current??'—'}`;
     const ph=(e.photos?.length||e.photo_count)?` · 📷 ${e.photos?.length||e.photo_count}`:'';return `<span class="num">${esc(amt)}</span>${e.period_label?' · '+esc(e.period_label):''}${ph}`};
   $('#list').innerHTML=list.length?list.slice(0,40).map(e=>`<div class="it"><span class="ai ${TYPES[e.type].cls}" style="background:${{expense:'#f1edff',electricity:'#fff3df',water:'#e6f2ff',payment:'#e6f6ef'}[e.type]||'#eef0ff'}">${TYPES[e.type].icon}</span>
     <div class="grow"><b>${esc(title(e))}</b><small>${sub(e)}</small></div>${phoneState(e)}<button class="del" data-del="${e.id}" aria-label="حذف">🗑</button></div>`).join('')
