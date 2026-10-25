@@ -113,7 +113,7 @@ class Home{
     const keys=table==='electricity'?['period_id','record_date','bill_date','period_label','main_prev','main_current','total_consumption','invoice_amount','fees','roof_prev','roof_current','roof_consumption','roof_amount','apartment_consumption','apartment_amount','car_prev','car_current','home_consumption','car_consumption','car_share','car_amount','home_amount','car_km','status','tariff_snapshot','validation_diff','notes']
       :['period_id','record_date','bill_date','period_label','invoice_amount','total_consumption','roof_prev','roof_current','roof_consumption','apartment_consumption','roof_water','roof_sewer','roof_amount','apartment_water','apartment_sewer','apartment_amount','status','tariff_snapshot','validation_diff','notes'];
     const id=this.s.run(`INSERT INTO ${table}(${keys.join(',')}) VALUES(${keys.map(()=>'?').join(',')})`,keys.map(k=>p[k]??null));
-    if(table==='water')this.syncUtility(pid,'ماء',calc.apartment_amount,'water');this.audit('create',table,id,`Validation ${calc.check_diff}`);return id}
+    this.audit('create',table,id,`Validation ${calc.check_diff}`);return id}
   updateReading(table,id,d){const r0=this.s.one(`SELECT * FROM ${table} WHERE id=?`,[id]);if(!r0)throw new Error('القراءة مش موجودة');this.needOpen(r0.period_id);
     const calcKeys=table==='electricity'?['record_date','bill_date','invoice_amount','fees','main_prev','main_current','roof_prev','roof_current','car_prev','car_current','car_km']:['record_date','bill_date','invoice_amount','total_consumption','roof_prev','roof_current'];
     const rec={...r0};for(const [k,v] of Object.entries(d))if(v!==null&&v!==undefined)rec[k]=v;
@@ -121,13 +121,11 @@ class Home{
       const res=table==='electricity'?calcElectric(rec,t):calcWater(rec,t);Object.assign(rec,res,{validation_diff:res.check_diff,tariff_snapshot:JSON.stringify(t)});
       const keys=table==='electricity'?['record_date','bill_date','period_label','main_prev','main_current','total_consumption','invoice_amount','fees','roof_prev','roof_current','roof_consumption','roof_amount','apartment_consumption','apartment_amount','car_prev','car_current','home_consumption','car_consumption','car_share','car_amount','home_amount','car_km','status','tariff_snapshot','validation_diff','notes']
         :['record_date','bill_date','period_label','invoice_amount','total_consumption','roof_prev','roof_current','roof_consumption','apartment_consumption','roof_water','roof_sewer','roof_amount','apartment_water','apartment_sewer','apartment_amount','status','tariff_snapshot','validation_diff','notes'];
-      this.s.run(`UPDATE ${table} SET ${keys.map(k=>k+'=?').join(',')} WHERE id=?`,[...keys.map(k=>rec[k]??null),id]);if(table==='water')this.syncUtility(r0.period_id,'ماء',res.apartment_amount,'water')}
+      this.s.run(`UPDATE ${table} SET ${keys.map(k=>k+'=?').join(',')} WHERE id=?`,[...keys.map(k=>rec[k]??null),id])}
     else for(const k of ['status','notes'])if(k in d)this.s.run(`UPDATE ${table} SET ${k}=? WHERE id=?`,[d[k],id]);
     this.audit('update',table,id)}
   deleteReading(table,id){const r0=this.s.one(`SELECT * FROM ${table} WHERE id=?`,[id]);if(!r0)throw new Error('القراءة مش موجودة');this.needOpen(r0.period_id);
     this.s.run(`DELETE FROM ${table} WHERE id=?`,[id]);
-    if(table==='water'){const latest=this.s.one('SELECT * FROM water WHERE period_id=? ORDER BY record_date DESC,id DESC LIMIT 1',[r0.period_id]);
-      if(!latest)this.s.run("UPDATE expenses SET actual=0,updated_at=? WHERE period_id=? AND source_type='water'",[nowIso(),r0.period_id]);else this.syncUtility(r0.period_id,'ماء',sf(latest.apartment_amount),'water')}
     this.audit('delete',table,id)}
   checkPayment(account,d,paymentId){const amount=money(d.amount,'المبلغ'),paidOn=isoDay(d.paid_on,'تاريخ الدفع');let pid=Number(d.period_id)||null;const link=!!d.link_to_expenses;
     if(link){if(account.kind==='owed_to_me')throw new Error('الدين اللي إلك ما بيصير مصروف');if(!pid)throw new Error('اختار الشهر');if(!this.s.one('SELECT 1 FROM periods WHERE id=?',[pid]))throw new Error('الشهر مش موجود');this.needOpen(pid)}
