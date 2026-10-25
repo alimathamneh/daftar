@@ -37,6 +37,8 @@ h1{font-size:21px;margin:0}h2{font-size:17px;margin:0 0 12px}
 .zoom img{max-width:none;width:180%;touch-action:pinch-zoom}
 .syncbar{display:flex;align-items:center;gap:10px;background:#fff7e6;border:1px solid #f0d7aa;color:#8c5a0a;border-radius:14px;padding:10px 12px;margin-bottom:12px;font-size:13.5px;font-weight:600}
 .syncbar span{flex:1}.syncbar .btn{width:auto;min-height:38px;padding:6px 14px;font-size:13.5px}
+.a-gas{grid-column:1/-1;flex-direction:row;align-items:center}.a-gas .ai{background:#ffe9e0}
+html[data-theme="dark"] .a-gas .ai{background:#3a2016}
 .a-shop{grid-column:1/-1;flex-direction:row;align-items:center}.a-shop .ai{background:#fff1e6}
 .shop-add{display:flex;gap:8px;margin-bottom:10px}.shop-add input{min-height:46px;border:1px solid #dfe3ec;border-radius:12px;padding:10px 12px;font-size:16px;min-width:0}
 .shop-add .n{flex:2}.shop-add .q{flex:1}.shop-add .btn{width:auto;padding:0 16px}
@@ -129,6 +131,7 @@ code{direction:ltr;unicode-bidi:isolate;background:#eef0f5;border-radius:6px;pad
     <button class="action a-el" data-form="electricity"><span class="ai">⚡</span><b>قراءة كهرباء</b><small>مع صورة العداد</small></button>
     <button class="action a-wa" data-form="water"><span class="ai">💧</span><b>قراءة مياه</b><small>مع صورة العداد</small></button>
     <button class="action a-pay" data-form="payment"><span class="ai">💳</span><b>دفعة قسط</b><small>أو دين</small></button>
+    <button class="action a-gas" id="openGas"><span class="ai">🔥</span><b>الغاز</b><small id="gasInfo">متى بدّلت الجرة</small></button>
     <button class="action a-shop" id="openShop"><span class="ai">🛒</span><b>الأغراض</b><small id="shopInfo">قائمة التسوّق</small></button>
     <button class="action a-view" id="openView"><span class="ai">📊</span><b>عرض بياناتي</b><small>شوف، عدّل أو احذف</small></button>
   </div>
@@ -155,7 +158,7 @@ const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMon
 const money=v=>`${Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:3})} JOD`;
 const dmy=s=>{const p=String(s||'').slice(0,10).split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:'—'};
 function toast(msg,err=false){const t=$('#toast');t.textContent=msg;t.className='toast show'+(err?' err':'');clearTimeout(toast.t);toast.t=setTimeout(()=>t.className='toast',3200)}
-const TYPES={expense:{icon:'🧾',name:'مصروف',cls:'a-exp'},electricity:{icon:'⚡',name:'قراءة كهرباء',cls:'a-el'},water:{icon:'💧',name:'قراءة مياه',cls:'a-wa'},payment:{icon:'💳',name:'دفعة قسط',cls:'a-pay'},edit:{icon:'✏️',name:'تعديل',cls:'a-view'},delete:{icon:'🗑',name:'حذف',cls:'a-view'}};
+const TYPES={expense:{icon:'🧾',name:'مصروف',cls:'a-exp'},electricity:{icon:'⚡',name:'قراءة كهرباء',cls:'a-el'},water:{icon:'💧',name:'قراءة مياه',cls:'a-wa'},payment:{icon:'💳',name:'دفعة قسط',cls:'a-pay'},edit:{icon:'✏️',name:'تعديل',cls:'a-view'},gas:{icon:'🔥',name:'تبديل جرة',cls:'a-gas'},delete:{icon:'🗑',name:'حذف',cls:'a-view'}};
 
 // ---------- IndexedDB: entries (with photo blobs) and settings ----------
 const dbp=new Promise((res,rej)=>{const r=indexedDB.open('home-monthly-phone',1);
@@ -644,6 +647,36 @@ async function shoppingScreen(){
     if(!shared&&confirm('بدك تسجّل اللي دفعته كمصروف؟')){expenseForm();setTimeout(()=>{$('#fName').value='سوبرماركت';$('#fName').dispatchEvent(new Event('change'));$('#fAmount').focus()},50)}});
 }
 
+// ---------- gas cylinders: the computer's numbers, updated at once with swaps not uploaded yet ----------
+async function gasState(){
+  const base=CAT?.gas?.cylinders||[{cylinder:'المطبخ',last:null,avg:null,swaps:0}],day=s=>new Date(s+'T00:00:00');
+  const mine=(await allEntries()).filter(e=>e.type==='gas'&&CAT?.inbox?.[e.id]!=='applied').map(e=>e.data);
+  const list=base.map(x=>({...x}));
+  for(const s of mine){let x=list.find(c=>c.cylinder===s.cylinder);if(!x){x={cylinder:s.cylinder,last:null,avg:null,swaps:0};list.push(x)}
+    if(!x.last||s.swapped_on>x.last)x.last=s.swapped_on}
+  for(const x of list){x.since=x.last?Math.round((Date.now()-day(x.last))/864e5):null;x.left=x.avg==null||x.since==null?null:Math.round(x.avg-x.since)}
+  return list;
+}
+const gasLine=x=>!x.last?'لسا ما سجّلت تبديل':`${x.since} يوم من التبديل`+(x.left==null?'':x.left<=0?' · غالباً خلصت':` · باقي ~${x.left} يوم`);
+async function gasScreen(){
+  const list=await gasState();
+  openSheet(`${head('الغاز')}<div class="card">${list.map(x=>`<div class="line"><span class="grow"><span>🔥 ${esc(x.cylinder)}</span><small>${esc(gasLine(x))}${x.avg?` · بتطوّل ${x.avg} يوم`:''}</small></span>${x.left!=null&&x.left<=3?'<span class="st wait">قرّبت</span>':''}</div>`).join('')}
+    ${CAT?.gas?.spent_this_year?`<p class="hint">صرفت عالغاز هالسنة ${money(CAT.gas.spent_this_year)}</p>`:''}</div>
+   <div class="card"><h2>بدّلت الجرة</h2>
+    <div class="row"><div class="field"><label>الجرة</label><input id="gName" list="gNames" value="${esc(list[0]?.cylinder||'المطبخ')}"><datalist id="gNames">${list.map(x=>`<option value="${esc(x.cylinder)}">`).join('')}</datalist></div>
+    <div class="field"><label>التاريخ</label><input id="gDate" type="date" value="${today()}"></div></div>
+    <div class="field"><label>السعر (اختياري)</label><input id="gPrice" type="number" inputmode="decimal" step="0.001"></div>
+    <p class="hint">إذا كتبت السعر، بينسجّل كمصروف "غاز" وبيستنى موافقتك عالكمبيوتر.</p>
+    <button class="btn" id="gSave">🔥 سجّل التبديل</button></div>`);
+  $('#closeSheet').onclick=closeSheet;
+  $('#gSave').onclick=async()=>{const cyl=val('gName')||'المطبخ',day=val('gDate'),price=numv('gPrice');if(!day)return toast('اختار التاريخ',true);
+    const mk=(type,data,pid)=>({id:crypto.randomUUID(),type,created_at:new Date().toISOString(),period_id:pid?Number(pid):null,period_label:pid?periodLabel(pid):'',data,photos:[]});
+    await putEntry(mk('gas',{id:crypto.randomUUID().replace(/-/g,''),cylinder:cyl,swapped_on:day,price,by:MYNAME}));
+    const pid=openPeriods()[0]?.id;
+    if(price>0&&pid)await putEntry(mk('expense',{mode:'new',name:'غاز',category:'الاحتياجات',section:'apartment',amount:price,paid:true,date:day,notes:`جرة ${cyl}`},pid));
+    toast('انسجّل التبديل ✓');gasScreen();autoSync(true)};
+}
+
 // In shopping-only mode the shopping list is the whole app.
 async function renderShopHome(){if(MODE==='shop')return shoppingScreen();return renderHome()}
 
@@ -684,6 +717,7 @@ async function dropDeleted(){const ib=CAT?.inbox||{};for(const e of await allEnt
 async function renderHome(){
   const every=(await allEntries()).sort((a,b)=>b.created_at.localeCompare(a.created_at));
   const pending=every.filter(e=>!e.uploaded_at),list=every.filter(e=>e.type!=='shopping');
+  {const g=(await gasState())[0];$('#gasInfo').textContent=g?gasLine(g):'متى بدّلت الجرة'}
   if(CAT){const v=await shopView(),left=v.items.filter(x=>!x.in_cart).length;$('#shopInfo').textContent=left?`${left} أغراض بالقائمة`:'قائمة التسوّق'}
   $('#pendingInfo').textContent=pending.length?`${pending.length} بانتظار الرفع`:'';
   $('#uploadBtn').textContent=pending.length?`⬆️ ارفع على Drive (${pending.length})`:'⬆️ ارفع على Drive';
@@ -695,7 +729,7 @@ async function renderHome(){
   $('#syncBtn').textContent=needLogin?'سجّل دخول للرفع':'ارفع هلأ';
   $('#catInfo').textContent=CAT?`القوائم من ${dmy(CAT.generated_at)}`:'لسا ما في قوائم — حدّثها من Drive';
   const title=e=>{const d=e.data||{};if(e.type==='edit'||e.type==='delete')return `${TYPES[e.type].name}: ${d.label||''}`;if(e.type==='expense')return `${d.mode==='pay'?'دفعة: ':''}${d.name||'مصروف'}`;if(e.type==='payment')return d.obligation_name||'دفعة قسط';return TYPES[e.type].name};
-  const sub=e=>{const d=e.data||{};if(e.type==='edit')return esc(Object.keys(d.changes||{}).length+' حقول تغيّرت');if(e.type==='delete')return esc(KIND_AR[d.kind]||'');const amt=d.amount?money(d.amount):e.type==='electricity'?`رئيسي ${d.main_current??'—'}`:`روف ${d.roof_current??'—'}`;
+  const sub=e=>{const d=e.data||{};if(e.type==='gas')return esc(`${d.cylinder} · ${dmy(d.swapped_on)}`);if(e.type==='edit')return esc(Object.keys(d.changes||{}).length+' حقول تغيّرت');if(e.type==='delete')return esc(KIND_AR[d.kind]||'');const amt=d.amount?money(d.amount):e.type==='electricity'?`رئيسي ${d.main_current??'—'}`:`روف ${d.roof_current??'—'}`;
     const ph=(e.photos?.length||e.photo_count)?` · 📷 ${e.photos?.length||e.photo_count}`:'';return `<span class="num">${esc(amt)}</span>${e.period_label?' · '+esc(e.period_label):''}${ph}`};
   $('#list').innerHTML=list.length?list.slice(0,40).map(e=>`<div class="it"><span class="ai ${TYPES[e.type].cls}" style="background:${{expense:'#f1edff',electricity:'#fff3df',water:'#e6f2ff',payment:'#e6f6ef'}[e.type]||'#eef0ff'}">${TYPES[e.type].icon}</span>
     <div class="grow"><b>${esc(title(e))}</b><small>${sub(e)}</small></div>${phoneState(e)}<button class="del" data-del="${e.id}" aria-label="حذف">🗑</button></div>`).join('')
@@ -719,7 +753,7 @@ addEventListener('online',net);addEventListener('offline',net);
 
 document.querySelectorAll('[data-form]').forEach(b=>b.onclick=()=>{if(!CAT)toast('ما في قوائم لسا. حدّثها من Drive لما يصير عندك نت.',true);
   ({expense:expenseForm,electricity:()=>readingForm('electricity'),water:()=>readingForm('water'),payment:paymentForm})[b.dataset.form]()});
-$('#openView').onclick=viewScreen;$('#openShop').onclick=shoppingScreen;$('#uploadBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());$('#syncBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());
+$('#openView').onclick=viewScreen;$('#openShop').onclick=shoppingScreen;$('#openGas').onclick=gasScreen;$('#uploadBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());$('#syncBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());
 addEventListener('online',()=>autoSync(true));
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')autoSync()});$('#refreshBtn').onclick=e=>withBusy(e.currentTarget,()=>refreshCatalog(),'بحدّث القوائم…');$('#openSettings').onclick=openSettings;
 
