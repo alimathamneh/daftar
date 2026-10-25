@@ -442,7 +442,7 @@ const FORMS={
   payment:[['amount','المبلغ','num'],['paid_on','تاريخ الدفع','date'],['notes','ملاحظات','text']],
   period:[['salary','الدخل / الراتب','num'],['notes','ملاحظات الشهر','text']]};
 const KIND_AR={expense:'مصروف',electricity:'قراءة كهرباء',water:'قراءة مياه',payment:'دفعة قسط',period:'الشهر'};
-let VIEW={pid:null,filter:'all'};
+let VIEW={pid:null,filter:'all',cat:''};
 async function pendingChanges(){const m={};for(const e of await allEntries())if(!e.uploaded_at&&(e.type==='edit'||e.type==='delete'))m[e.data.kind+':'+e.data.id]=e;return m}
 const withChange=(rec,ch)=>ch&&ch.type==='edit'?{...rec,...ch.data.changes}:rec;
 const tag=ch=>ch?(ch.type==='delete'?'<span class="st wait">بينحذف</span>':'<span class="st edit">بانتظار الكمبيوتر</span>'):'';
@@ -451,7 +451,12 @@ async function viewScreen(){
   if(!CAT)return toast('حدّث القوائم من Drive أول',true);
   const ps=CAT.periods||[];if(!VIEW.pid||!ps.some(p=>String(p.id)===String(VIEW.pid)))VIEW.pid=ps[0]?.id;
   const pid=String(VIEW.pid),p=ps.find(x=>String(x.id)===pid),closed=p?.status==='closed',S=CAT.summary?.[pid]||{},ch=await pendingChanges();
-  const ex=(CAT.expenses?.[pid]||[]).filter(e=>VIEW.filter==='all'||Number(e.actual)-Number(e.paid_amount||0)>0.0005);
+  const catOf=e=>(e.category||'').trim()||'—',allEx=CAT.expenses?.[pid]||[];
+  const cats={};for(const e of allEx){const k=catOf(e);cats[k]=(cats[k]||0)+Number(e.actual||0)}
+  if(VIEW.cat&&!(VIEW.cat in cats))VIEW.cat='';
+  const ex=allEx.filter(e=>(VIEW.filter==='all'||Number(e.actual)-Number(e.paid_amount||0)>0.0005)&&(!VIEW.cat||catOf(e)===VIEW.cat));
+  const catBar=Object.keys(cats).length<2?'':`<div class="kpis" style="margin-bottom:10px">${[['',S.actual??allEx.reduce((t,e)=>t+Number(e.actual||0),0),'الكل'],...Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[k,v,k])]
+    .map(([k,v,l])=>`<button type="button" class="kpi" data-cat="${esc(k)}" style="text-align:start;${VIEW.cat===k?'border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,92,240,.15)':''}"><small>${esc(l)}</small><b class="num">${money(v)}</b></button>`).join('')}</div>`;
   const rd=CAT.readings?.[pid]||{},pe=withChange(p,ch['period:'+pid]);
   const util=(kind,r)=>{if(!r)return '';const c=ch[kind+':'+r.id],x=withChange(r,c);
     return `<button class="line ${c?.type==='delete'?'gone':''}" data-edit="${kind}:${r.id}"><span class="grow"><span>${kind==='electricity'?'⚡ الكهرباء':'💧 المياه'} ${tag(c)}</span><small>البيت ${money(x.apartment_amount)} · الروف ${money(x.roof_amount)}${kind==='electricity'?` · السيارة ${money(x.car_amount)}`:''}</small></span>${badge(x.status)}</button>`};
@@ -465,6 +470,7 @@ async function viewScreen(){
    ${reportCard(CAT.reports?.[pid])}
    ${(rd.electricity?.[0]||rd.water?.[0])?`<div class="card"><div class="sub">الفواتير</div>${util('electricity',rd.electricity?.[0])}${util('water',rd.water?.[0])}
      <button class="btn soft" id="roofBtn" style="margin-top:10px">🧾 كشف الروف لهالشهر</button></div>`:''}
+   ${catBar}
    <div class="card"><div class="seg"><button type="button" data-f="all" class="${VIEW.filter==='all'?'on':''}">كل المصاريف</button><button type="button" data-f="unpaid" class="${VIEW.filter==='unpaid'?'on':''}">غير المدفوع</button></div>
     ${ex.length?ex.map(e=>{const c=ch['expense:'+e.id],x=withChange(e,c);return `<button class="line ${c?.type==='delete'?'gone':''}" data-edit="expense:${e.id}"><span class="grow"><span>${esc(x.name)} ${tag(c)}</span><small>${esc(x.category||'')}</small></span><span style="text-align:left"><b class="num">${money(x.actual)}</b><br>${badge(x.status)}</span></button>`}).join(''):'<div class="empty">ما في مصاريف.</div>'}</div>
    <div class="card"><div class="sub">الأقساط والديون</div>${(CAT.obligations||[]).map(o=>`<button class="line" data-ob="${o.id}"><span class="grow"><span>${esc(o.name)}</span><small>${o.monthly_amount?`القسط ${money(o.monthly_amount)} · `:''}${(o.payments||[]).length} دفعات</small></span><b class="num">باقي ${money(o.remaining)}</b></button>`).join('')||'<div class="empty">ما في أقساط.</div>'}</div>
@@ -472,6 +478,7 @@ async function viewScreen(){
   $('#closeSheet').onclick=closeSheet;
   $('#vMonth').onchange=()=>{VIEW.pid=$('#vMonth').value;viewScreen()};
   sheet.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{VIEW.filter=b.dataset.f;viewScreen()});
+  sheet.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{VIEW.cat=b.dataset.cat;viewScreen()});
   sheet.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{if(closed)return toast('الشهر مسكّر',true);const [k,id]=b.dataset.edit.split(':');editRecord(k,id)});
   sheet.querySelectorAll('[data-ob]').forEach(b=>b.onclick=()=>paymentsScreen(b.dataset.ob));
   $('#roofBtn')&&($('#roofBtn').onclick=()=>roofScreen(pid));
