@@ -28,6 +28,11 @@ h1{font-size:21px;margin:0}h2{font-size:17px;margin:0 0 12px}
 .action{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:16px 14px;border-radius:18px;border:1px solid #e8ebf2;background:#fff;text-align:start;box-shadow:0 1px 2px rgba(16,24,40,.04)}
 .action b{font-size:15px}.action small{color:var(--muted);font-size:12px}
 .ai{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:20px}
+.ocrbtn{display:inline-flex;align-items:center;gap:6px;margin-top:6px;font-size:13px;font-weight:700;color:#4646c9;background:var(--soft);border-radius:10px;padding:7px 11px;align-self:flex-start}
+.ocrbtn input{display:none}
+.field input.ocr{border-color:#f0b84b;background:#fffaf0}
+.zoom{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.92);display:grid;place-items:center;overflow:auto;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.zoom img{max-width:none;width:180%;touch-action:pinch-zoom}
 .syncbar{display:flex;align-items:center;gap:10px;background:#fff7e6;border:1px solid #f0d7aa;color:#8c5a0a;border-radius:14px;padding:10px 12px;margin-bottom:12px;font-size:13.5px;font-weight:600}
 .syncbar span{flex:1}.syncbar .btn{width:auto;min-height:38px;padding:6px 14px;font-size:13.5px}
 .a-view{grid-column:1/-1;flex-direction:row;align-items:center}.a-view .ai{background:#eef0ff}
@@ -242,7 +247,41 @@ async function shrink(file){const url=URL.createObjectURL(file);try{const img=aw
   c.getContext('2d').drawImage(img,0,0,c.width,c.height);return await new Promise(res=>c.toBlob(b=>res(b||file),'image/jpeg',.82))}catch{return file}finally{URL.revokeObjectURL(url)}}
 let PHOTOS=[];
 function photoBlock(label){return `<div class="field"><label>${label}</label><div class="photos" id="photoList"></div><label class="pick">📷 صوّر أو اختار صورة<input type="file" accept="image/*" multiple id="photoInput"></label></div>`}
-function drawPhotos(){const box=$('#photoList');if(!box)return;box.innerHTML=PHOTOS.map((p,i)=>`<span class="ph"><img src="${p.url}" alt=""><button type="button" data-rm="${i}">✕</button></span>`).join('');
+// ---------- meter numbers from a photo (Tesseract.js, bundled in ocr/ and run on the phone) ----------
+let OCR=null;
+async function ocrWorker(){
+  if(OCR)return OCR;
+  if(!window.Tesseract)await new Promise((res,rej)=>{const s=document.createElement('script');s.src='ocr/tesseract.min.js';s.onload=res;s.onerror=rej;document.head.append(s)});
+  OCR=Tesseract.createWorker('eng',1,{workerPath:'ocr/worker.min.js',corePath:'ocr/',langPath:'ocr/',gzip:true,workerBlobURL:false})
+    .then(async w=>{await w.setParameters({tessedit_pageseg_mode:'11'});return w}).catch(e=>{OCR=null;throw e});
+  return OCR;
+}
+async function readMeter(blob,previous,avgUse){
+  const url=URL.createObjectURL(blob),img=await new Promise((r,j)=>{const i=new Image();i.onload=()=>r(i);i.onerror=j;i.src=url});
+  // Black-and-white copy (threshold at the image's mean) so the digits stand out from the meter face.
+  const draw=(invert,binary)=>{const c=document.createElement('canvas'),s=Math.min(1,700/img.naturalWidth);c.width=img.naturalWidth*s;c.height=img.naturalHeight*s;
+    const g=c.getContext('2d');g.filter=`grayscale(1) contrast(1.6)${invert?' invert(1)':''}`;g.drawImage(img,0,0,c.width,c.height);
+    if(binary){const d=g.getImageData(0,0,c.width,c.height),px=d.data;let sum=0;for(let i=0;i<px.length;i+=4)sum+=px[i];const mean=sum/(px.length/4);
+      for(let i=0;i<px.length;i+=4){const v=px[i]>mean?255:0;px[i]=px[i+1]=px[i+2]=v}g.putImageData(d,0,0)}
+    return c};
+  // Digital meters have dark digits on light, drum meters light on black; each photo is read four ways and the readings pooled.
+  const w=await ocrWorker(),found=[];
+  for(const [inv,bin] of [[false,false],[true,false],[false,true],[true,true]]){const {data}=await w.recognize(draw(inv,bin));
+    for(const word of data.words||[]){const t=(word.text||'').replace(/[Oo]/g,'0').replace(/[Il|]/g,'1').replace(/S/g,'5').replace(/B/g,'8').replace(/\D/g,'');if(t.length>=3&&t.length<=8)
+      found.push({n:Number(t),h:word.bbox.y1-word.bbox.y0,conf:word.confidence})}}
+  URL.revokeObjectURL(url);if(!found.length)return null;
+  const p=Number(previous),known=previous!=null&&previous!==''&&!isNaN(p);
+  // A sensible reading is at or above the last one and not far beyond normal use.
+  const room=Math.max(10*(Number(avgUse)||0),known?p*0.2:0,500);
+  const fits=known?found.filter(x=>x.n>=p&&x.n-p<=room):found;
+  const pool=fits.length?fits:known?[]:found;if(!pool.length)return null;
+  // Big digits first (the counter is the largest text on the meter), then confidence.
+  pool.sort((a,b)=>b.h-a.h||b.conf-a.conf);return pool[0].n;
+}
+function zoom(url){const z=document.createElement('div');z.className='zoom';z.innerHTML=`<img src="${url}" alt="">`;z.onclick=()=>z.remove();document.body.append(z)}
+
+function drawPhotos(){const box=$('#photoList');if(!box)return;box.innerHTML=PHOTOS.map((p,i)=>`<span class="ph"><img src="${p.url}" alt="" data-zoom="${i}"><button type="button" data-rm="${i}">✕</button></span>`).join('');
+  box.querySelectorAll('[data-zoom]').forEach(im=>im.onclick=()=>zoom(PHOTOS[+im.dataset.zoom].url));
   box.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{URL.revokeObjectURL(PHOTOS[+b.dataset.rm].url);PHOTOS.splice(+b.dataset.rm,1);drawPhotos()})}
 function bindPhotos(){const inp=$('#photoInput');if(!inp)return;inp.onchange=async()=>{for(const f of inp.files){if(PHOTOS.length>=6){toast('بكفي 6 صور',true);break}const blob=await shrink(f);PHOTOS.push({blob,name:f.name||'photo.jpg',url:URL.createObjectURL(blob)})}inp.value='';drawPhotos()}}
 
@@ -304,9 +343,24 @@ function readingForm(kind){
    <div id="readWarn" class="warn" style="margin-bottom:10px"></div>
    ${photoBlock('صور العدادات والفاتورة')}
    <button class="btn" id="saveBtn">احفظ</button></div>`);
-  const check=()=>{const w=[];const lower=(id,k,n)=>{const v=numv(id);if(v!=null&&last?.[k]!=null&&v<Number(last[k]))w.push(`${n} أقل من القراءة السابقة`)};
-    if(el){lower('fMain','main_current','العداد الرئيسي');lower('fCar','car_current','عداد السيارة')}lower('fRoof','roof_current','عداد الروف');$('#readWarn').textContent=w.join(' · ')};
+  const avg=CAT?.avg_use||{};
+  const check=()=>{const w=[];const test=(id,k,n,a)=>{const v=numv(id);if(v==null||last?.[k]==null)return;const use=v-Number(last[k]);
+      if(use<0)w.push(`${n} أقل من القراءة السابقة`);else if(a>0&&use>2*a)w.push(`${n}: الاستهلاك ${Math.round(use)} أكثر من ضعف المعدّل (${Math.round(a)})`)};
+    if(el){test('fMain','main_current','العداد الرئيسي',avg.main);test('fCar','car_current','عداد السيارة',avg.car);test('fRoof','roof_current','عداد الروف',avg.roof)}
+    else test('fRoof','roof_current','عداد الروف',avg.water_roof);$('#readWarn').textContent=w.join(' · ')};
   sheet.querySelectorAll('input[type=number]').forEach(i=>i.addEventListener('input',check));
+  // "Read from photo" under each meter: the photo is kept with the reading and the number is only a suggestion.
+  const meters=el?[['fMain','main_current'],['fRoof','roof_current'],['fCar','car_current']]:[['fRoof','roof_current']];
+  for(const [id,k] of meters){const inp=$('#'+id);const b=document.createElement('label');b.className='ocrbtn';
+    b.innerHTML='📷 اقرأ الرقم من صورة<input type="file" accept="image/*" capture="environment">';inp.after(b);
+    b.querySelector('input').onchange=async ev=>{const f=ev.target.files[0];ev.target.value='';if(!f)return;
+      const blob=await shrink(f);PHOTOS.push({blob,name:`${id}.jpg`,url:URL.createObjectURL(blob)});drawPhotos();
+      b.firstChild.textContent='⏳ عم بقرأ الرقم… ';
+      try{const n=await readMeter(blob,last?.[k],{main_current:avg.main,roof_current:el?avg.roof:avg.water_roof,car_current:avg.car}[k]);if(n==null)toast('ما قدرت أقرأ الرقم، اكتبه بإيدك',true);
+        else{inp.value=n;inp.classList.add('ocr');inp.dispatchEvent(new Event('input'));toast('انقرأ الرقم من الصورة — تأكد منه')}}
+      catch(e){toast('القراءة من الصورة بتحتاج نت أول مرة',true)}
+      finally{b.firstChild.textContent='📷 اقرأ الرقم من صورة'}};
+    inp.addEventListener('input',e=>{if(e.isTrusted)inp.classList.remove('ocr')})}
   bindPhotos();$('#closeSheet').onclick=closeSheet;
   $('#saveBtn').onclick=()=>{if(!val('fPeriod'))return toast('اختار الشهر',true);
     const data=el?{record_date:val('fDate'),bill_date:val('fBill'),main_current:numv('fMain'),roof_current:numv('fRoof'),car_current:numv('fCar'),invoice_amount:numv('fInvoice'),fees:numv('fFees')||0,car_km:numv('fKm'),notes:val('fNotes')}
