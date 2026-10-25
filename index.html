@@ -60,6 +60,11 @@ h1{font-size:21px;margin:0}h2{font-size:17px;margin:0 0 12px}
 .btn.soft{background:var(--soft);color:#4646c9}
 .btn.danger{background:#fff1f3;color:var(--red)}
 .btn:disabled{opacity:.5}
+@keyframes spin{to{transform:rotate(360deg)}}
+.btn.busy{opacity:.85;pointer-events:none}
+.btn.busy::before,.chip.busy::before{content:"";width:16px;height:16px;border-radius:50%;border:2.5px solid currentColor;border-inline-end-color:transparent;animation:spin .7s linear infinite;flex:none}
+.chip.busy::before{width:11px;height:11px;border-width:2px}
+.chip.busy{background:var(--soft);color:#4646c9}
 .row{display:flex;gap:10px}.row>*{flex:1;min-width:0}
 .field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
 .field label{font-size:13px;font-weight:700;color:#4b5568}
@@ -259,7 +264,7 @@ async function upload(silent=false){
 let lastAuto=0;
 async function autoSync(force=false){
   if(!navigator.onLine||(!force&&Date.now()-lastAuto<20000))return;lastAuto=Date.now();
-  await upload(true);await refreshCatalog(true);
+  await withBusy(null,async()=>{await upload(true);await refreshCatalog(true)});
 }
 
 // ---------- months, lists and labels ----------
@@ -311,7 +316,9 @@ function zoom(url){const z=document.createElement('div');z.className='zoom';z.in
 function drawPhotos(){const box=$('#photoList');if(!box)return;box.innerHTML=PHOTOS.map((p,i)=>`<span class="ph"><img src="${p.url}" alt="" data-zoom="${i}"><button type="button" data-rm="${i}">✕</button></span>`).join('');
   box.querySelectorAll('[data-zoom]').forEach(im=>im.onclick=()=>zoom(PHOTOS[+im.dataset.zoom].url));
   box.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{URL.revokeObjectURL(PHOTOS[+b.dataset.rm].url);PHOTOS.splice(+b.dataset.rm,1);drawPhotos()})}
-function bindPhotos(){const inp=$('#photoInput');if(!inp)return;inp.onchange=async()=>{for(const f of inp.files){if(PHOTOS.length>=6){toast('بكفي 6 صور',true);break}const blob=await shrink(f);PHOTOS.push({blob,name:f.name||'photo.jpg',url:URL.createObjectURL(blob)})}inp.value='';drawPhotos()}}
+function bindPhotos(){const inp=$('#photoInput');if(!inp)return;inp.onchange=async()=>{const pick=inp.closest('.pick'),txt=pick.firstChild.textContent;pick.firstChild.textContent='⏳ بجهّز الصور… ';
+  try{await addPhotos(inp)}finally{pick.firstChild.textContent=txt}}}
+async function addPhotos(inp){{for(const f of inp.files){if(PHOTOS.length>=6){toast('بكفي 6 صور',true);break}const blob=await shrink(f);PHOTOS.push({blob,name:f.name||'photo.jpg',url:URL.createObjectURL(blob)})}inp.value='';drawPhotos()}}
 
 // ---------- forms ----------
 const sheet=$('#sheet');
@@ -660,14 +667,21 @@ function applyTheme(){let t='auto';try{t=localStorage.getItem('hm-theme')||'auto
   const dark=t==='dark'||(t==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';
   document.querySelector('meta[name=theme-color]').setAttribute('content',dark?'#0f1220':'#5b5cf0')}
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',applyTheme);applyTheme();
-function net(){const on=navigator.onLine;$('#net').textContent=on?'متصل':'بدون نت';$('#net').classList.toggle('off',!on)}
+// A spinner on the button that started the work; the status chip also shows that Drive is being used.
+let working=0;
+async function withBusy(btn,fn,label){
+  const old=btn?.innerHTML;if(btn){btn.classList.add('busy');if(label)btn.textContent=label}
+  working++;net();
+  try{return await fn()}finally{working--;net();if(btn&&btn.isConnected){btn.classList.remove('busy');if(label)btn.innerHTML=old}}
+}
+function net(){const on=navigator.onLine,c=$('#net');c.textContent=working?'عم يتزامن':on?'متصل':'بدون نت';c.classList.toggle('off',!on&&!working);c.classList.toggle('busy',!!working)}
 addEventListener('online',net);addEventListener('offline',net);
 
 document.querySelectorAll('[data-form]').forEach(b=>b.onclick=()=>{if(!CAT)toast('ما في قوائم لسا. حدّثها من Drive لما يصير عندك نت.',true);
   ({expense:expenseForm,electricity:()=>readingForm('electricity'),water:()=>readingForm('water'),payment:paymentForm})[b.dataset.form]()});
-$('#openView').onclick=viewScreen;$('#openShop').onclick=shoppingScreen;$('#uploadBtn').onclick=()=>upload();$('#syncBtn').onclick=()=>upload();
+$('#openView').onclick=viewScreen;$('#openShop').onclick=shoppingScreen;$('#uploadBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());$('#syncBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());
 addEventListener('online',()=>autoSync(true));
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')autoSync()});$('#refreshBtn').onclick=refreshCatalog;$('#openSettings').onclick=openSettings;
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')autoSync()});$('#refreshBtn').onclick=e=>withBusy(e.currentTarget,()=>refreshCatalog(),'بحدّث القوائم…');$('#openSettings').onclick=openSettings;
 
 (async()=>{
   net();CAT=await kvGet('catalog')||null;await renderHome();
