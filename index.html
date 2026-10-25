@@ -246,11 +246,20 @@ async function upload(silent=false){
   if(!navigator.onLine)return silent?null:toast('بدك إنترنت للرفع',true);
   const key=await kvGet('key');if(!key)return silent?null:toast('اضغط "تحديث القوائم" أول عشان تدخل كلمة التشفير',true);
   const tok=silent?await validToken():await token('upload');if(!tok)return renderHome();
-  uploading=true;const btn=$('#uploadBtn');btn.disabled=true;let done=0;
+  uploading=true;const btn=$('#uploadBtn');btn.disabled=true;let done=0,direct=0,list=pending;
   try{
-    const inbox=await inboxFolder(tok);
-    for(const e of pending){
-      btn.textContent=`⬆️ برفع ${done+1} من ${pending.length}…`;
+    // Computer off: change the Drive copy of the database directly. Anything it refuses goes the usual way.
+    try{const res=await Direct.run(tok,pending,key);
+      if(res){const now=new Date().toISOString();
+        for(const e of pending)if(res.applied.includes(e.id)){e.uploaded_at=now;e.direct='applied';e.photo_count=(e.photos||[]).length;e.photos=[];await putEntry(e);direct++}
+        if(res.catalog){CAT=res.catalog;await kvSet('catalog',CAT)}
+        list=pending.filter(e=>!res.applied.includes(e.id));
+        if(direct)toast(`انحفظ بالبرنامج مباشرة ✓ (${direct})`+(list.length?` · ${list.length} رح يستنوا الكمبيوتر`:''));
+        for(const [id,why] of Object.entries(res.failed))console.warn('direct',id,why)}
+    }catch(err){if(err.reauth)throw err;toast('ما قدرت أعدّل مباشرة ('+err.message+')، رح يوصل عن طريق الكمبيوتر',true)}
+    const inbox=list.length?await inboxFolder(tok):null;
+    for(const e of list){
+      btn.textContent=`⬆️ برفع ${done+1} من ${list.length}…`;
       const photos=[];for(const p of e.photos||[])photos.push({name:p.name,type:p.blob.type||'image/jpeg',data:await blobB64(p.blob)});
       const body={id:e.id,type:e.type,created_at:e.created_at,period_id:e.period_id,period_label:e.period_label,device:'iPhone',data:e.type==='shopping'?{ops:Object.values(e.data.ops||{})}:e.data,photos};
       const payload=b64e(await encryptBytes(key.raw,new TextEncoder().encode(JSON.stringify(body))));
@@ -262,7 +271,7 @@ async function upload(silent=false){
       // Keep a light copy for the list; the photos are on Drive now.
       e.uploaded_at=new Date().toISOString();e.photo_count=(e.photos||[]).length;e.photos=[];await putEntry(e);done++;
     }
-    toast(`تم رفع ${done} ✓ ضيفهم من البرنامج عالكمبيوتر`);
+    if(done)toast(`تم رفع ${done} ✓ الكمبيوتر بيضيفهم أول ما يشتغل`);
   }catch(err){if(err.reauth&&silent){if(done)toast(`تم رفع ${done} ✓`)}else{toast((done?`انرفع ${done}. `:'')+err.message,true);if(err.reauth)signIn('upload')}}
   finally{uploading=false;btn.disabled=false;renderHome()}
 }
@@ -721,7 +730,7 @@ async function openSettings(){
 
 // ---------- home ----------
 // What the computer did with an entry (sent with the lists): waiting, added, ignored.
-function phoneState(e){if(!e.uploaded_at)return '<span class="st wait">بالآيفون</span>';
+function phoneState(e){if(!e.uploaded_at)return '<span class="st wait">بالآيفون</span>';if(e.direct==='applied')return '<span class="st done">انضاف ✓</span>';
   const s=CAT?.inbox?.[e.id];return s==='applied'?'<span class="st done">انضاف ✓</span>':s==='dismissed'?'<span class="st no">متجاهَل</span>':'<span class="st part">بانتظار الكمبيوتر</span>'}
 // Entries deleted on the computer leave the phone too.
 async function dropDeleted(){const ib=CAT?.inbox||{};for(const e of await allEntries())if(e.uploaded_at&&ib[e.id]==='deleted')await delEntry(e.id)}
@@ -782,5 +791,6 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
   if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 })();
 </script>
+<script src="direct.js"></script>
 </body>
 </html>
