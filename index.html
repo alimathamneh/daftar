@@ -231,6 +231,10 @@ async function refreshCatalog(silent=false){
       toast('بجهّز المفتاح… لحظة');key={salt:wrap.salt,raw:await deriveRaw(pass,wrap.salt)}}
     let data;try{data=JSON.parse(new TextDecoder().decode(await decryptBytes(key.raw,b64d(wrap.payload))))}
     catch{await kvDel('key');throw new Error('كلمة التشفير غلط، جرّب مرة ثانية')}
+    // Computer off: its catalog predates the phone's direct edits, so read the Drive copy instead.
+    try{const fresh=await Direct.lists(tok,key,data);if(fresh)data=fresh}catch(err){if(err.reauth)throw err;console.warn('lists',err)}
+    // Never go back to an older list than the one already on the phone.
+    if(CAT&&Date.parse(CAT.generated_at)>Date.parse(data.generated_at))data=CAT;
     const changed=!CAT||CAT.generated_at!==data.generated_at;
     await kvSet('key',key);await kvSet('catalog',data);CAT=data;await pruneShopping();await dropDeleted();renderHome();if(!silent||changed)toast('تم تحديث القوائم ✓');
   }catch(e){if(e.reauth){if(!silent)signIn('refresh');else renderHome()}else if(!silent)toast(e.message,true)}
