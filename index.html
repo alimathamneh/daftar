@@ -221,7 +221,7 @@ async function refreshCatalog(silent=false){
     let data;try{data=JSON.parse(new TextDecoder().decode(await decryptBytes(key.raw,b64d(wrap.payload))))}
     catch{await kvDel('key');throw new Error('كلمة التشفير غلط، جرّب مرة ثانية')}
     const changed=!CAT||CAT.generated_at!==data.generated_at;
-    await kvSet('key',key);await kvSet('catalog',data);CAT=data;await pruneShopping();renderHome();if(!silent||changed)toast('تم تحديث القوائم ✓');
+    await kvSet('key',key);await kvSet('catalog',data);CAT=data;await pruneShopping();await dropDeleted();renderHome();if(!silent||changed)toast('تم تحديث القوائم ✓');
   }catch(e){if(e.reauth){if(!silent)signIn('refresh');else renderHome()}else if(!silent)toast(e.message,true)}
 }
 
@@ -629,6 +629,11 @@ async function openSettings(){
 }
 
 // ---------- home ----------
+// What the computer did with an entry (sent with the lists): waiting, added, ignored.
+function phoneState(e){if(!e.uploaded_at)return '<span class="st wait">بالآيفون</span>';
+  const s=CAT?.inbox?.[e.id];return s==='applied'?'<span class="st done">انضاف ✓</span>':s==='dismissed'?'<span class="st no">متجاهَل</span>':'<span class="st part">بانتظار الكمبيوتر</span>'}
+// Entries deleted on the computer leave the phone too.
+async function dropDeleted(){const ib=CAT?.inbox||{};for(const e of await allEntries())if(e.uploaded_at&&ib[e.id]==='deleted')await delEntry(e.id)}
 async function renderHome(){
   const every=(await allEntries()).sort((a,b)=>b.created_at.localeCompare(a.created_at));
   const pending=every.filter(e=>!e.uploaded_at),list=every.filter(e=>e.type!=='shopping');
@@ -646,9 +651,10 @@ async function renderHome(){
   const sub=e=>{const d=e.data||{};if(e.type==='edit')return esc(Object.keys(d.changes||{}).length+' حقول تغيّرت');if(e.type==='delete')return esc(KIND_AR[d.kind]||'');const amt=d.amount?money(d.amount):e.type==='electricity'?`رئيسي ${d.main_current??'—'}`:`روف ${d.roof_current??'—'}`;
     const ph=(e.photos?.length||e.photo_count)?` · 📷 ${e.photos?.length||e.photo_count}`:'';return `<span class="num">${esc(amt)}</span>${e.period_label?' · '+esc(e.period_label):''}${ph}`};
   $('#list').innerHTML=list.length?list.slice(0,40).map(e=>`<div class="it"><span class="ai ${TYPES[e.type].cls}" style="background:${{expense:'#f1edff',electricity:'#fff3df',water:'#e6f2ff',payment:'#e6f6ef'}[e.type]||'#eef0ff'}">${TYPES[e.type].icon}</span>
-    <div class="grow"><b>${esc(title(e))}</b><small>${sub(e)}</small></div>${e.uploaded_at?'<span class="st done">انرفع ✓</span>':`<span class="st wait">بالآيفون</span><button class="del" data-del="${e.id}" aria-label="حذف">🗑</button>`}</div>`).join('')
+    <div class="grow"><b>${esc(title(e))}</b><small>${sub(e)}</small></div>${phoneState(e)}<button class="del" data-del="${e.id}" aria-label="حذف">🗑</button></div>`).join('')
     :'<div class="empty">لسا ما سجّلت شي.</div>';
-  $('#list').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{if(confirm('تحذف هالتسجيل من الآيفون؟')){await delEntry(b.dataset.del);renderHome()}});
+  $('#list').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{const e=list.find(x=>x.id===b.dataset.del);
+    if(confirm(e?.uploaded_at?'بينشال من قائمة الآيفون بس. اللي انرفع للكمبيوتر بتحذفه من صفحة "من الآيفون" هناك.':'تحذف هالتسجيل؟ لسا ما انرفع، فرح يضيع.')){await delEntry(b.dataset.del);renderHome()}});
 }
 function applyTheme(){let t='auto';try{t=localStorage.getItem('hm-theme')||'auto'}catch{}
   const dark=t==='dark'||(t==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';
