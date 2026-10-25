@@ -35,6 +35,13 @@ h1{font-size:21px;margin:0}h2{font-size:17px;margin:0 0 12px}
 .zoom img{max-width:none;width:180%;touch-action:pinch-zoom}
 .syncbar{display:flex;align-items:center;gap:10px;background:#fff7e6;border:1px solid #f0d7aa;color:#8c5a0a;border-radius:14px;padding:10px 12px;margin-bottom:12px;font-size:13.5px;font-weight:600}
 .syncbar span{flex:1}.syncbar .btn{width:auto;min-height:38px;padding:6px 14px;font-size:13.5px}
+.a-shop{grid-column:1/-1;flex-direction:row;align-items:center}.a-shop .ai{background:#fff1e6}
+.shop-add{display:flex;gap:8px;margin-bottom:10px}.shop-add input{min-height:46px;border:1px solid #dfe3ec;border-radius:12px;padding:10px 12px;font-size:16px;min-width:0}
+.shop-add .n{flex:2}.shop-add .q{flex:1}.shop-add .btn{width:auto;padding:0 16px}
+.shop-row{display:flex;align-items:center;gap:10px;padding:12px 2px;border-bottom:1px solid #eef1f5}.shop-row:last-child{border-bottom:0}
+.shop-row label{flex:1;display:flex;align-items:center;gap:12px;font-size:16px;min-width:0}.shop-row input{width:26px;height:26px;accent-color:var(--brand);flex:none}
+.shop-row small{color:var(--muted);font-size:13px}.shop-row.done span{text-decoration:line-through;color:var(--muted)}
+.shop-row button{border:0;background:none;font-size:18px;padding:4px 6px;color:var(--muted)}.shop-row .star.on{color:#e0a106}
 .a-view{grid-column:1/-1;flex-direction:row;align-items:center}.a-view .ai{background:#eef0ff}
 .kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
 .kpi{background:#fff;border:1px solid #e8ebf2;border-radius:14px;padding:11px 12px}.kpi small{display:block;color:var(--muted);font-size:12px}.kpi b{font-size:17px}
@@ -97,6 +104,7 @@ code{direction:ltr;unicode-bidi:isolate;background:#eef0f5;border-radius:6px;pad
     <button class="action a-el" data-form="electricity"><span class="ai">⚡</span><b>قراءة كهرباء</b><small>مع صورة العداد</small></button>
     <button class="action a-wa" data-form="water"><span class="ai">💧</span><b>قراءة مياه</b><small>مع صورة العداد</small></button>
     <button class="action a-pay" data-form="payment"><span class="ai">💳</span><b>دفعة قسط</b><small>أو دين</small></button>
+    <button class="action a-shop" id="openShop"><span class="ai">🛒</span><b>الأغراض</b><small id="shopInfo">قائمة التسوّق</small></button>
     <button class="action a-view" id="openView"><span class="ai">📊</span><b>عرض بياناتي</b><small>شوف، عدّل أو احذف</small></button>
   </div>
   <div class="card">
@@ -193,7 +201,7 @@ async function refreshCatalog(silent=false){
     let data;try{data=JSON.parse(new TextDecoder().decode(await decryptBytes(key.raw,b64d(wrap.payload))))}
     catch{await kvDel('key');throw new Error('كلمة التشفير غلط، جرّب مرة ثانية')}
     const changed=!CAT||CAT.generated_at!==data.generated_at;
-    await kvSet('key',key);await kvSet('catalog',data);CAT=data;renderHome();if(!silent||changed)toast('تم تحديث القوائم ✓');
+    await kvSet('key',key);await kvSet('catalog',data);CAT=data;await pruneShopping();renderHome();if(!silent||changed)toast('تم تحديث القوائم ✓');
   }catch(e){if(e.reauth){if(!silent)signIn('refresh');else renderHome()}else if(!silent)toast(e.message,true)}
 }
 
@@ -213,7 +221,7 @@ async function upload(silent=false){
     for(const e of pending){
       btn.textContent=`⬆️ برفع ${done+1} من ${pending.length}…`;
       const photos=[];for(const p of e.photos||[])photos.push({name:p.name,type:p.blob.type||'image/jpeg',data:await blobB64(p.blob)});
-      const body={id:e.id,type:e.type,created_at:e.created_at,period_id:e.period_id,period_label:e.period_label,device:'iPhone',data:e.data,photos};
+      const body={id:e.id,type:e.type,created_at:e.created_at,period_id:e.period_id,period_label:e.period_label,device:'iPhone',data:e.type==='shopping'?{ops:Object.values(e.data.ops||{})}:e.data,photos};
       const payload=b64e(await encryptBytes(key.raw,new TextEncoder().encode(JSON.stringify(body))));
       const meta={name:`phone-${e.id}.json`,parents:[inbox],mimeType:'application/json'};
       const boundary='hm'+Math.random().toString(36).slice(2);
@@ -517,6 +525,55 @@ async function editRecord(kind,id){
   $('#eUndo')&&($('#eUndo').onclick=async()=>{await delEntry(old.id);toast('انلغى الطلب');back()});
 }
 
+// ---------- shopping list (shared with the computer; last change wins, item by item) ----------
+const shopEntries=async()=>(await allEntries()).filter(e=>e.type==='shopping');
+async function shopView(){
+  const map=new Map();for(const x of [...(CAT?.shopping?.items||[]),...(CAT?.shopping?.staples||[])])map.set(x.id,{...x});
+  const ops=[];for(const e of await shopEntries())ops.push(...Object.values(e.data.ops||{}));
+  ops.sort((a,b)=>a.updated_at.localeCompare(b.updated_at));
+  for(const op of ops){const cur=map.get(op.id);if(!cur||op.updated_at>=(cur.updated_at||'')){if(op.deleted)map.delete(op.id);else map.set(op.id,{...cur,...op})}}
+  const all=[...map.values()];return {items:all.filter(x=>!x.staple).sort((a,b)=>(a.in_cart-b.in_cart)||b.updated_at.localeCompare(a.updated_at)),staples:all.filter(x=>x.staple)};
+}
+async function shopChange(list){
+  // All changes waiting to go up live in one entry; an item changed twice keeps only its latest state.
+  let e=(await shopEntries()).find(x=>!x.uploaded_at);
+  if(!e)e={id:crypto.randomUUID(),type:'shopping',created_at:new Date().toISOString(),period_id:null,period_label:'',data:{ops:{}},photos:[]};
+  for(const op of list)e.data.ops[op.id]={...op,updated_at:new Date().toISOString()};
+  await putEntry(e);await shoppingScreen();autoSync(true);
+}
+// Uploaded changes stay on screen until the computer's list shows them (or for a day at most).
+async function pruneShopping(){if(!CAT?.shopping)return;
+  const have=new Map([...CAT.shopping.items,...CAT.shopping.staples].map(x=>[x.id,x]));
+  for(const e of await shopEntries()){if(!e.uploaded_at)continue;
+    const seen=Object.values(e.data.ops||{}).every(op=>{const x=have.get(op.id);return op.deleted?!x:x&&x.updated_at>=op.updated_at});
+    if(seen||Date.now()-Date.parse(e.uploaded_at)>864e5)await delEntry(e.id)}}
+async function shoppingScreen(){
+  const v=await shopView(),left=v.items.filter(x=>!x.in_cart).length,names=CAT?.shopping?.names||[],uid=()=>crypto.randomUUID().replace(/-/g,'');
+  const isStaple=n=>v.staples.some(s=>s.name===n);
+  openSheet(`${head('الأغراض')}
+   <form class="shop-add" id="shopForm"><input class="n" id="sName" list="sNames" placeholder="أضف غرض" autocomplete="off"><datalist id="sNames">${names.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
+    <input class="q" id="sQty" placeholder="الكمية"><button class="btn">أضف</button></form>
+   <div class="card"><div class="row" style="align-items:center;margin-bottom:4px"><b>${v.items.length?`باقي ${left} من ${v.items.length}`:'القائمة فاضية'}</b>
+     ${v.staples.length?'<button class="btn white" id="sStaples" style="width:auto;min-height:38px;font-size:13.5px">⭐ أضف الدايمين</button>':''}</div>
+    ${v.items.map(x=>`<div class="shop-row ${x.in_cart?'done':''}"><label><input type="checkbox" data-c="${x.id}" ${x.in_cart?'checked':''}><span>${esc(x.name)}</span>${x.qty?`<small>${esc(x.qty)}</small>`:''}</label>
+      <button class="star ${isStaple(x.name)?'on':''}" data-s="${x.id}" aria-label="دايم">★</button><button data-d="${x.id}" aria-label="حذف">✕</button></div>`).join('')}</div>
+   ${v.items.some(x=>x.in_cart)?'<button class="btn" id="sDone">✓ خلصت التسوّق</button>':''}
+   <p class="hint" style="text-align:center">★ = بنشتريه كل مرة. القائمة نفسها بالبرنامج عالكمبيوتر.</p>`);
+  $('#closeSheet').onclick=closeSheet;
+  $('#shopForm').onsubmit=e=>{e.preventDefault();const name=val('sName');if(!name)return;if(v.items.some(x=>x.name===name&&!x.in_cart))return toast('موجود بالقائمة');
+    shopChange([{id:uid(),name,qty:val('sQty'),in_cart:0,staple:0,deleted:0}])};
+  const find=id=>v.items.find(x=>x.id===id);
+  sheet.querySelectorAll('[data-c]').forEach(b=>b.onchange=()=>shopChange([{...find(b.dataset.c),in_cart:b.checked?1:0,deleted:0}]));
+  sheet.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>shopChange([{...find(b.dataset.d),deleted:1}]));
+  sheet.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{const x=find(b.dataset.s),s=v.staples.find(i=>i.name===x.name);
+    shopChange([s?{...s,deleted:1}:{id:uid(),name:x.name,qty:x.qty||'',in_cart:0,staple:1,deleted:0}])});
+  $('#sStaples')&&($('#sStaples').onclick=()=>{const have=new Set(v.items.filter(x=>!x.in_cart).map(x=>x.name));
+    const add=v.staples.filter(s=>!have.has(s.name)).map(s=>({id:uid(),name:s.name,qty:s.qty||'',in_cart:0,staple:0,deleted:0}));
+    add.length?shopChange(add):toast('كل الدايمين موجودين')});
+  $('#sDone')&&($('#sDone').onclick=async()=>{await shopChange(v.items.filter(x=>x.in_cart).map(x=>({...x,deleted:1})));
+    if(confirm('بدك تسجّل اللي دفعته كمصروف؟')){expenseForm();setTimeout(()=>{$('#fName').value='سوبرماركت';$('#fName').dispatchEvent(new Event('change'));$('#fAmount').focus()},50)}});
+}
+
 // ---------- settings ----------
 async function openSettings(){
   const cid=await kvGet('client_id')||'',key=await kvGet('key');
@@ -535,8 +592,9 @@ async function openSettings(){
 
 // ---------- home ----------
 async function renderHome(){
-  const list=(await allEntries()).sort((a,b)=>b.created_at.localeCompare(a.created_at));
-  const pending=list.filter(e=>!e.uploaded_at);
+  const every=(await allEntries()).sort((a,b)=>b.created_at.localeCompare(a.created_at));
+  const pending=every.filter(e=>!e.uploaded_at),list=every.filter(e=>e.type!=='shopping');
+  if(CAT){const v=await shopView(),left=v.items.filter(x=>!x.in_cart).length;$('#shopInfo').textContent=left?`${left} أغراض بالقائمة`:'قائمة التسوّق'}
   $('#pendingInfo').textContent=pending.length?`${pending.length} بانتظار الرفع`:'';
   $('#uploadBtn').textContent=pending.length?`⬆️ ارفع على Drive (${pending.length})`:'⬆️ ارفع على Drive';
   // Reminder when entries wait: a sign-in button if Google needs it, otherwise after two days.
@@ -559,7 +617,7 @@ addEventListener('online',net);addEventListener('offline',net);
 
 document.querySelectorAll('[data-form]').forEach(b=>b.onclick=()=>{if(!CAT)toast('ما في قوائم لسا. حدّثها من Drive لما يصير عندك نت.',true);
   ({expense:expenseForm,electricity:()=>readingForm('electricity'),water:()=>readingForm('water'),payment:paymentForm})[b.dataset.form]()});
-$('#openView').onclick=viewScreen;$('#uploadBtn').onclick=()=>upload();$('#syncBtn').onclick=()=>upload();
+$('#openView').onclick=viewScreen;$('#openShop').onclick=shoppingScreen;$('#uploadBtn').onclick=()=>upload();$('#syncBtn').onclick=()=>upload();
 addEventListener('online',()=>autoSync(true));
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')autoSync()});$('#refreshBtn').onclick=refreshCatalog;$('#openSettings').onclick=openSettings;
 
