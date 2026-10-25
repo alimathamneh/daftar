@@ -7,6 +7,8 @@
 <meta name="theme-color" content="#5b5cf0">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
+<script>(function(){var t='auto';try{t=localStorage.getItem('hm-theme')||'auto'}catch(e){}
+  document.documentElement.dataset.theme=(t==='dark'||(t==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches))?'dark':'light'})();</script>
 <style>
 @font-face{font-family:Plex;font-weight:400;src:url(fonts/ibm-plex-sans-arabic-arabic-400-normal.woff2) format("woff2");unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFC,U+200C-200E}
 @font-face{font-family:Plex;font-weight:700;src:url(fonts/ibm-plex-sans-arabic-arabic-600-normal.woff2) format("woff2");unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFC,U+200C-200E}
@@ -89,6 +91,24 @@ h1{font-size:21px;margin:0}h2{font-size:17px;margin:0 0 12px}
 .empty{color:var(--muted);text-align:center;padding:18px 0;font-size:13.5px}
 .num{direction:ltr;unicode-bidi:isolate;font-variant-numeric:tabular-nums}
 .steps{padding-inline-start:20px;margin:6px 0 12px;font-size:13.5px}.steps li{margin-bottom:6px}
+/* Dark mode (Settings: automatic / light / dark) */
+html[data-theme="dark"]{color-scheme:dark;--bg:#0f1220;--card:#171b2d;--text:#e6e9f2;--muted:#98a1b8;--border:#2a3048;--soft:#262a52;--brand:#7273ff;--green:#3fcf8e;--red:#ff6b7f;--amber:#f2b445}
+html[data-theme="dark"] :is(.card,.action,.icon-btn,.kpi,.btn.white,.field input,.field select,.field textarea,.shop-add input,.seg button.on){background-color:var(--card);border-color:var(--border);color:var(--text)}
+html[data-theme="dark"] .seg{background:#12162a}
+html[data-theme="dark"] :is(.line,.list .it,.shop-row){border-color:var(--border)}
+html[data-theme="dark"] .pick{background:#12162a;border-color:#3a4160;color:#c9cfe0}
+html[data-theme="dark"] .field label{color:#b4bcd0}
+html[data-theme="dark"] .btn.soft{background:var(--soft);color:#b9baff}
+html[data-theme="dark"] .btn.danger{background:#3a1820;color:#ff8597}
+html[data-theme="dark"] .chip{background:#123426;color:#5fe0a5}.chip.off{background:#3a2a10}
+html[data-theme="dark"] .st.wait{background:#3a2a10;color:#f2c879}html[data-theme="dark"] .st.done{background:#123426;color:#5fe0a5}
+html[data-theme="dark"] .st.part{background:#162a45;color:#8fc0f5}html[data-theme="dark"] .st.edit{background:var(--soft);color:#b9baff}html[data-theme="dark"] .st.no{background:#262b40;color:#b4bcd0}
+html[data-theme="dark"] .syncbar{background:#2e2412;border-color:#5a4520;color:#f2c879}
+html[data-theme="dark"] :is(.a-exp .ai,.a-view .ai){background:#262a52}html[data-theme="dark"] .a-el .ai{background:#3a2a10}html[data-theme="dark"] .a-wa .ai{background:#16304d}
+html[data-theme="dark"] .a-pay .ai{background:#123426}html[data-theme="dark"] .a-shop .ai{background:#35241a}
+html[data-theme="dark"] .field input.ocr{background:#2e2412;border-color:#8a6a22}
+html[data-theme="dark"] .ocrbtn{color:#b9baff}
+html[data-theme="dark"] code{background:#262b40}
 code{direction:ltr;unicode-bidi:isolate;background:#eef0f5;border-radius:6px;padding:1px 5px;font-size:12.5px;word-break:break-all}
 </style>
 </head>
@@ -597,11 +617,13 @@ async function openSettings(){
    <div class="field"><label>Google Client ID (نوع Web)</label><input id="sCid" dir="ltr" value="${esc(cid)}" placeholder="....apps.googleusercontent.com"></div>
    <p class="hint">رابط هالصفحة اللي لازم تحطه بـ Google: <code>${esc(appUrl())}</code></p>
    <button class="btn" id="sSave">احفظ</button></div>
+   <div class="card"><h2>المظهر</h2><div class="seg">${[['auto','تلقائي'],['light','فاتح'],['dark','غامق']].map(([k,l])=>`<button type="button" data-th="${k}" class="${(localStorage.getItem('hm-theme')||'auto')===k?'on':''}">${l}</button>`).join('')}</div></div>
    <div class="card"><h2>التشفير</h2><p class="hint">${key?'كلمة التشفير محفوظة على هالآيفون.':'لسا ما دخلت كلمة التشفير. بتنطلب أول مرة بتحدّث القوائم.'}</p>
    <button class="btn white" id="sForget">انسَ كلمة التشفير</button></div>
    <div class="card"><h2>تنظيف</h2><p class="hint">بيمسح التسجيلات اللي انرفعت من القائمة. اللي لسا ما انرفع ما بينمسح.</p><button class="btn danger" id="sClean">امسح المرفوع</button></div>`);
   $('#closeSheet').onclick=closeSheet;
   $('#sSave').onclick=async()=>{const v=val('sCid');if(v&&!v.endsWith('.apps.googleusercontent.com'))return toast('الرقم لازم يخلص بـ .apps.googleusercontent.com',true);await kvSet('client_id',v);await kvDel('token');toast('انحفظ ✓')};
+  sheet.querySelectorAll('[data-th]').forEach(b=>b.onclick=()=>{try{localStorage.setItem('hm-theme',b.dataset.th)}catch{}applyTheme();sheet.querySelectorAll('[data-th]').forEach(x=>x.classList.toggle('on',x===b))});
   $('#sForget').onclick=async()=>{await kvDel('key');toast('انمسحت كلمة التشفير من الآيفون');openSettings()};
   $('#sClean').onclick=async()=>{const up=(await allEntries()).filter(e=>e.uploaded_at);for(const e of up)await delEntry(e.id);toast(`انمسح ${up.length}`)};
 }
@@ -628,6 +650,10 @@ async function renderHome(){
     :'<div class="empty">لسا ما سجّلت شي.</div>';
   $('#list').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{if(confirm('تحذف هالتسجيل من الآيفون؟')){await delEntry(b.dataset.del);renderHome()}});
 }
+function applyTheme(){let t='auto';try{t=localStorage.getItem('hm-theme')||'auto'}catch{}
+  const dark=t==='dark'||(t==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';
+  document.querySelector('meta[name=theme-color]').setAttribute('content',dark?'#0f1220':'#5b5cf0')}
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',applyTheme);applyTheme();
 function net(){const on=navigator.onLine;$('#net').textContent=on?'متصل':'بدون نت';$('#net').classList.toggle('off',!on)}
 addEventListener('online',net);addEventListener('offline',net);
 
