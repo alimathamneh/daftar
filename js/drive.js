@@ -42,6 +42,8 @@ async function refreshCatalog(silent=false){
   try{
     const key=await driveKey(tok,silent);if(!key)return;
     let data;try{data=await Direct.lists(tok,key,CAT)}catch(err){if(err.badKey)await kvDel('key');throw err}
+    // The other phone's shopping changes come in here too; a problem there never blocks the lists.
+    try{data=await Direct.shopExchange(tok,key,data)}catch(err){if(err.reauth)throw err;console.warn('shared shopping',err)}
     const changed=!CAT||JSON.stringify({...CAT,generated_at:0})!==JSON.stringify({...data,generated_at:0});
     await kvSet('key',key);await kvSet('catalog',data);CAT=data;await pruneShopping();renderHome();if(!silent||changed)toast('تم تحديث القوائم ✓');
   }catch(e){if(e.reauth){if(!silent)signIn('refresh');else renderHome()}else if(!silent)toast(e.message,true)}
