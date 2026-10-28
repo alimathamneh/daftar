@@ -117,8 +117,13 @@ function readingForm(kind){
       if(use<0)w.push(`${n} أقل من القراءة السابقة`);else if(a>0&&use>2*a)w.push(`${n}: الاستهلاك ${Math.round(use)} أكثر من ضعف المعدّل (${Math.round(a)})`)};
     if(el){test('fMain','main_current','العداد الرئيسي',avg.main);test('fCar','car_current','عداد السيارة',avg.car);test('fRoof','roof_current','عداد الروف',avg.roof)}
     else test('fRoof','roof_current','عداد الروف',avg.water_roof);$('#readWarn').textContent=w.join(' · ');preview()};
+  $('#fPeriod')?.addEventListener('change',()=>check());
+  // The reading a new one is measured from, by the same rule as saving (Home.previous in direct.js):
+  // the latest reading of an earlier month than the one chosen.
+  const prevOf=()=>{const p=(CAT?.periods||[]).find(x=>String(x.id)===String(val('fPeriod'))),list=CAT?.meters?.[kind];if(!p||!list)return last||{};
+    return list.filter(x=>x.period_date&&x.period_date<p.period_date).sort((a,b)=>b.period_date.localeCompare(a.period_date)||String(b.record_date).localeCompare(String(a.record_date)))[0]||{}};
   // Live bill preview with the same formulas the PC uses; nothing is saved until "احفظ".
-  const preview=()=>{const box=$('#calcBox'),t=CAT?.tariffs?.[kind]||undefined,L=last||{},k3=x=>`${(+x).toFixed(3)} JOD`,q=x=>Math.round(+x*1000)/1000;
+  const preview=()=>{const box=$('#calcBox'),t=CAT?.tariffs?.[kind]||undefined,L=prevOf(),k3=x=>`${(+x).toFixed(3)} JOD`,q=x=>Math.round(+x*1000)/1000;
     let rows=[];
     if(el){const mc=numv('fMain');if(mc==null||L.main_current==null){box.innerHTML='';return}
       const c=Direct.calcElectric({main_prev:L.main_current,main_current:mc,roof_prev:L.roof_current,roof_current:numv('fRoof')??L.roof_current,car_prev:L.car_current,car_current:numv('fCar')??L.car_current,fees:numv('fFees')||0,invoice_amount:numv('fInvoice')},t);
