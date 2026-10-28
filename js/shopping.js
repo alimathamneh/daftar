@@ -9,7 +9,7 @@ async function sharedSync(interactive=false){
   const ff=async(name,folder)=>{const r=await gapi(tok,'https://www.googleapis.com/drive/v3/files?'+new URLSearchParams({q:`name = '${name}' and '${folder}' in parents and trashed = false`,fields:'files(id)',pageSize:'1'}));return (await r.json()).files?.[0]?.id};
   try{
     const folder=await findFolder(tok,'Home Monthly Shopping');if(!folder)throw new Error('ما لقيت مجلد الأغراض. لازم يشاركه معك صاحب البرنامج.');
-    const listId=await ff('shopping-list.json',folder),inId=await ff('shopping-changes.json',folder);if(!inId)throw new Error('لسا الكمبيوتر ما جهّز القائمة. جرّب بعد دقيقتين.');
+    const listId=await ff('shopping-list.json',folder),inId=await ff('shopping-changes.json',folder);if(!inId)throw new Error('لسا القائمة ما انجهزت. صاحب الدفتر لازم يفتح الدفتر عموبايله أو يشغّل البرنامج مرة، وبعدين جرّب.');
     let inbox={ops:[]};try{inbox=await (await gapi(tok,`https://www.googleapis.com/drive/v3/files/${inId}?alt=media`)).json()}catch{}
     const out=await kvGet('shopOut')||[];
     if(out.length){const seen=new Set(inbox.ops.map(o=>o.id+o.updated_at));inbox.ops=[...inbox.ops,...out.filter(o=>!seen.has(o.id+o.updated_at))].slice(-300);
