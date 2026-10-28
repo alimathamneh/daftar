@@ -200,25 +200,40 @@ function meterDetail(kind,id){
   $('#mEdit')&&($('#mEdit').onclick=()=>{VIEW.pid=x.period_id;editRecord(kind,x.id,()=>metersScreen(kind))});
 }
 
-// ---------- the living-room AC's breaker, as the computer recorded it (read only here) ----------
-const AC_EVENTS={on:'اشتغل',off:'انطفى',fault:'عطل',voltage:'الفولت برّا الطبيعي',offline:'انقطع الاتصال',online:'رجع الاتصال',gap:'استهلاك ناقص'};
+// ---------- both ACs, as the computer recorded them (read only here) ----------
+const AC_EVENTS={on:'اشتغل',off:'انطفى',fault:'عطل',voltage:'الفولت برّا الطبيعي',offline:'انقطع الاتصال',online:'رجع الاتصال',gap:'استهلاك ناقص',catchup:'استهلاك وقت الكمبيوتر مطفي'};
 const AC_FAULTS={ov_cr:'تيار زايد',ov_vol:'فولت عالي',ov_pwr:'حمل زايد',ls_cr:'تيار قليل',ls_vol:'فولت واطي',ls_pow:'حمل قليل'};
+const AC_MODES={auto:'تلقائي',cool:'تبريد',dry:'تجفيف',wind:'مروحة بس',heat:'تدفئة'};
+const AC_COLOR={living:'var(--brand,#5b5cf0)',bedroom:'#0ea5a4'};
 function acScreen(){
-  const b=CAT?.breaker;if(!b)return toast('ما في بيانات للمكيف لسا',true);
-  const L=b.live,max=Math.max(0.001,...b.hourly.map(h=>h.kwh||0)),cost=v=>v==null?'':`<span dir="ltr">${money(v)}</span>`;
-  const chart=`<div style="display:flex;align-items:flex-end;gap:2px;height:90px;direction:ltr;margin-top:6px">${b.hourly.map(h=>`<div title="${h.hour}:00" style="flex:1;border-radius:3px 3px 0 0;height:${h.kwh==null?2:Math.max(3,h.kwh/max*86)}px;background:${h.kwh==null?'var(--border,#e5e7eb)':'var(--brand,#5b5cf0)'}"></div>`).join('')}</div>
-    <div style="display:flex;justify-content:space-between;direction:ltr;font-size:11px;color:var(--muted)"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>`;
-  openSheet(`${head('❄️ مكيف الصالون')}
-   <div class="card">${L?`${row('الحالة',L.online===false?'<span class="st no">مش متصل</span>':L.on?'<span class="st done">شغّال</span>':'<span class="st wait">مطفي</span>')}
-     ${row('القدرة',`${num(L.power,1)} W`)}${row('الفولت',`${num(L.voltage,1)} V`)}${(L.faults||[]).length?row('<span style="color:var(--red)">عطل</span>',esc(L.faults.map(f=>AC_FAULTS[f]||f).join('، '))):''}
-     <p class="hint" style="margin:6px 0 0">آخر قراءة من الكمبيوتر: <span dir="ltr">${esc(String(L.at||'').slice(0,16))}</span></p>`:'<p class="hint">ما في قراءة لسا.</p>'}
-     ${b.last_report?`<p class="hint" style="margin:4px 0 0">آخر تقرير استهلاك من Tuya: <span dir="ltr">${esc(b.last_report.slice(0,16))}</span></p>`:''}</div>
-   <div class="kpis"><div class="kpi"><small>اليوم</small><b class="num">${num(b.today_kwh,2)} kWh</b><small>${cost(b.today_cost)}</small></div>
-    <div class="kpi"><small>هالشهر${b.month_first?` (من ${dmy(b.month_first).slice(0,5)})`:''}</small><b class="num">${num(b.month_kwh,2)} kWh</b><small>${cost(b.month_cost)}</small></div></div>
+  const list=[CAT?.samsung&&{key:'bedroom',name:'غرفة النوم',d:CAT.samsung},CAT?.breaker&&{key:'living',name:'الصالون',d:CAT.breaker}].filter(Boolean);
+  if(!list.length)return toast('ما في بيانات للمكيفات لسا',true);
+  const cost=v=>v==null?'':`<span dir="ltr">${money(v)}</span>`,sum=k=>list.reduce((t,x)=>t+(x.d[k]||0),0),costSum=k=>list.every(x=>x.d[k]==null)?null:sum(k);
+  const status=L=>!L||L.online===false?'<span class="st no">مش متصل</span>':L.on?'<span class="st done">شغّال</span>':'<span class="st wait">مطفي</span>';
+  const tot=i=>list.reduce((t,x)=>t+(x.d.hourly[i].kwh||0),0),max=Math.max(0.001,...list[0].d.hourly.map((_,i)=>tot(i)));
+  const chart=`<div style="display:flex;align-items:flex-end;gap:2px;height:90px;direction:ltr;margin-top:6px">${list[0].d.hourly.map((h,i)=>!tot(i)
+      ?`<div title="${h.hour}:00" style="flex:1;height:2px;background:var(--border,#e5e7eb)"></div>`
+      :`<div title="${h.hour}:00" style="flex:1;display:flex;flex-direction:column-reverse;border-radius:3px 3px 0 0;overflow:hidden">${list.map(x=>x.d.hourly[i].kwh?`<div style="height:${Math.max(2,x.d.hourly[i].kwh/max*86)}px;background:${AC_COLOR[x.key]}"></div>`:'').join('')}</div>`).join('')}</div>
+    <div style="display:flex;justify-content:space-between;direction:ltr;font-size:11px;color:var(--muted)"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>
+    ${list.length>1?`<div class="hint" style="display:flex;gap:12px;margin-top:6px">${list.map(x=>`<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${AC_COLOR[x.key]}"></span> ${x.name}</span>`).join('')}</div>`:''}`;
+  const card=x=>{const L=x.d.live,head=`<div class="sub">❄️ مكيف ${x.name}</div>${row('الحالة',status(L))}`;
+    const own=x.key==='bedroom'?(L?`${row('الوضع',esc(AC_MODES[L.mode]||L.mode||'—'))}${row('الدرجة المضبوطة',`${num(L.setpoint,0)}°`)}${row('حرارة الغرفة',`${num(L.temperature,0)}°`)}${row('الرطوبة',`${num(L.humidity,0)}%`)}${row('القدرة',`${num(L.power,0)} W`)}${L.windfree?row('WindFree','✓'):''}`:'')
+      :(L?`${row('القدرة',`${num(L.power,1)} W`)}${row('الفولت',`${num(L.voltage,1)} V`)}${(L.faults||[]).length?row('<span style="color:var(--red)">عطل</span>',esc(L.faults.map(f=>AC_FAULTS[f]||f).join('، '))):''}`:'');
+    return `<div class="card">${head}${own}${row('اليوم',`${num(x.d.today_kwh,2)} kWh`)}${row('هالشهر',`${num(x.d.month_kwh,2)} kWh`)}
+      ${L?`<p class="hint" style="margin:6px 0 0">آخر قراءة من الكمبيوتر: <span dir="ltr">${esc(String(L.at||'').slice(0,16))}</span></p>`:'<p class="hint">ما في قراءة لسا.</p>'}</div>`};
+  const first=list[0].d.month_first,price=list.map(x=>x.d.price_per_kwh).find(Boolean);
+  const days=[...new Set(list.flatMap(x=>x.d.daily.map(d=>d.day)))].sort().reverse();
+  const dayKwh=(x,day)=>(x.d.daily.find(d=>d.day===day)||{}).kwh||0;
+  const events=list.flatMap(x=>x.d.events.map(e=>({...e,ac:x}))).sort((a,c)=>String(c.at).localeCompare(String(a.at))).slice(0,15);
+  openSheet(`${head('❄️ المكيفات')}
+   <div class="kpis"><div class="kpi"><small>اليوم${list.length>1?' (الثنين)':''}</small><b class="num">${num(sum('today_kwh'),2)} kWh</b><small>${cost(costSum('today_cost'))}</small></div>
+    <div class="kpi"><small>هالشهر${first?` (من ${dmy(first).slice(0,5)})`:''}</small><b class="num">${num(sum('month_kwh'),2)} kWh</b><small>${cost(costSum('month_cost'))}</small></div></div>
+   ${list.map(card).join('')}
    <div class="card"><div class="sub">اليوم حسب الساعة</div>${chart}</div>
-   ${b.daily.length?`<div class="card"><div class="sub">هالشهر حسب اليوم</div>${b.daily.slice().reverse().map(d=>row(dmy(d.day),`${num(d.kwh,2)} kWh${b.price_per_kwh?' · '+money(d.kwh*b.price_per_kwh):''}`)).join('')}</div>`:''}
-   ${b.events.length?`<div class="card"><div class="sub">شو صار</div>${b.events.map(e=>row(esc(e.kind==='fault'?`عطل: ${AC_FAULTS[e.detail]||e.detail}`:AC_EVENTS[e.kind]||e.kind),esc(String(e.at).slice(5,16)))).join('')}</div>`:''}
-   <p class="hint" style="text-align:center">${b.price_per_kwh?`التكلفة تقديرية بمعدّل سعر آخر فاتورة (${num(b.price_per_kwh*1000,1)} فلس/kWh). `:''}الاستهلاك من Tuya، والبرنامج عالكمبيوتر بيسحبه كل ما يشتغل. التشغيل والإطفاء من البرنامج عالكمبيوتر، لأنه القاطع على شبكة البيت.</p>`);
+   ${days.length?`<div class="card"><div class="sub">هالشهر حسب اليوم</div>${days.map(day=>{const t=list.reduce((s,x)=>s+dayKwh(x,day),0);
+     return row(dmy(day),`${num(t,2)} kWh${price?' · '+money(t*price):''}${list.length>1?`<br><small class="hint">${list.map(x=>`${x.name} ${num(dayKwh(x,day),2)}`).join(' · ')}</small>`:''}`)}).join('')}</div>`:''}
+   ${events.length?`<div class="card"><div class="sub">شو صار</div>${events.map(e=>row(`<span style="color:${AC_COLOR[e.ac.key]}">●</span> ${esc(e.kind==='fault'?`عطل: ${AC_FAULTS[e.detail]||e.detail}`:AC_EVENTS[e.kind]||e.kind)}`,esc(String(e.at).slice(5,16)))).join('')}</div>`:''}
+   <p class="hint" style="text-align:center">${price?`التكلفة تقديرية بمعدّل سعر آخر فاتورة (${num(price*1000,1)} فلس/kWh). `:''}الأرقام من البرنامج عالكمبيوتر (Tuya لمكيف الصالون، وSmartThings لمكيف غرفة النوم). التحكم من البرنامج عالكمبيوتر.</p>`);
   $('#closeSheet').onclick=closeSheet;
 }
 
