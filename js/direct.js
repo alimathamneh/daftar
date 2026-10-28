@@ -228,21 +228,23 @@ function monthReport(s,pid){
     roof_total:r(Object.values(roof).reduce((t,v)=>t+(v?v.amount:0),0),3),installments:{paid:r(paidHere,3),left:r(left,3)},
     spend_ratio:ratio,avg_ratio:ratios.length?r(ratios.reduce((a,b)=>a+b,0)/ratios.length,1):null,avg_months:ratios.length}}
 
-// The AC breaker, as the computer recorded it (breaker.summary): today and this month, by hour and by day.
+// The AC breaker, as the computer copied it from the Tuya cloud (breaker.summary): today and this month, by hour
+// and by day. A report covers about the half hour before it, so it counts in the hour of its middle.
 // Read only: the phone can't reach the breaker, which is on the home network.
 function breakerSummary(s){
-  if(!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name='breaker_hourly'"))return null;
-  const today=nowIso().slice(0,10),month=today.slice(0,7);
-  const hours={};for(const x of s.all('SELECT * FROM breaker_hourly WHERE hour LIKE ? ORDER BY hour',[today+'%']))hours[x.hour.slice(11,13)]=x;
-  const days=s.all('SELECT substr(hour,1,10) day,SUM(kwh) kwh,MAX(max_w) max_w FROM breaker_hourly WHERE hour LIKE ? GROUP BY day ORDER BY day',[month+'%']);
+  if(!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name='breaker_energy'"))return null;
+  const today=nowIso().slice(0,10),month=today.slice(0,7),B="datetime(at,'-15 minutes')";
+  const hours={};for(const x of s.all(`SELECT strftime('%H',${B}) h,SUM(wh) wh FROM breaker_energy WHERE date(${B})=? GROUP BY h`,[today]))hours[x.h]={kwh:x.wh/1000};
+  const days=s.all(`SELECT date(${B}) day,SUM(wh)/1000.0 kwh FROM breaker_energy WHERE strftime('%Y-%m',${B})=? GROUP BY day ORDER BY day`,[month]);
+  const lastReport=(s.one('SELECT MAX(at) m FROM breaker_energy')||{}).m||null;
   const bill=s.one('SELECT home_amount,home_consumption FROM electricity WHERE home_consumption>0 AND home_amount>0 ORDER BY record_date DESC,id DESC LIMIT 1');
   const price=bill?r(bill.home_amount/bill.home_consumption,4):null;
   let live=null;try{live=JSON.parse((s.one("SELECT value FROM settings WHERE key='breaker_live'")||{}).value||'null')}catch{}
-  const todayKwh=r(Object.values(hours).reduce((t,x)=>t+sf(x.kwh),0),4),monthKwh=r(days.reduce((t,x)=>t+sf(x.kwh),0),4);
-  if(!live&&!days.length)return null;
-  return {live,today_kwh:todayKwh,month_kwh:monthKwh,price_per_kwh:price,today_cost:price?r(todayKwh*price,3):null,month_cost:price?r(monthKwh*price,3):null,
-    hourly:[...Array(24).keys()].map(h=>{const k=pad(h);return {hour:k,kwh:hours[k]?r(sf(hours[k].kwh),4):null}}),
-    daily:days.map(x=>({day:x.day,kwh:r(sf(x.kwh),4),max_w:x.max_w})),events:s.all('SELECT at,kind,detail FROM breaker_events ORDER BY id DESC LIMIT 12')}}
+  const todayKwh=r(Object.values(hours).reduce((t,x)=>t+sf(x.kwh),0),3),monthKwh=r(days.reduce((t,x)=>t+sf(x.kwh),0),3);
+  if(!live&&!days.length&&!lastReport)return null;
+  return {live,last_report:lastReport,today_kwh:todayKwh,month_kwh:monthKwh,price_per_kwh:price,today_cost:price?r(todayKwh*price,3):null,month_cost:price?r(monthKwh*price,3):null,
+    hourly:[...Array(24).keys()].map(h=>{const k=pad(h);return {hour:k,kwh:hours[k]?r(sf(hours[k].kwh),3):null}}),
+    daily:days.map(x=>({day:x.day,kwh:r(sf(x.kwh),3)})),events:s.all('SELECT at,kind,detail FROM breaker_events ORDER BY id DESC LIMIT 12')}}
 
 // Each gas cylinder: last swap, days since, average days it lasts (phone_inbox.gas on the computer).
 function gasState(s){
