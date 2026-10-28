@@ -228,6 +228,22 @@ function monthReport(s,pid){
     roof_total:r(Object.values(roof).reduce((t,v)=>t+(v?v.amount:0),0),3),installments:{paid:r(paidHere,3),left:r(left,3)},
     spend_ratio:ratio,avg_ratio:ratios.length?r(ratios.reduce((a,b)=>a+b,0)/ratios.length,1):null,avg_months:ratios.length}}
 
+// The AC breaker, as the computer recorded it (breaker.summary): today and this month, by hour and by day.
+// Read only: the phone can't reach the breaker, which is on the home network.
+function breakerSummary(s){
+  if(!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name='breaker_hourly'"))return null;
+  const today=nowIso().slice(0,10),month=today.slice(0,7);
+  const hours={};for(const x of s.all('SELECT * FROM breaker_hourly WHERE hour LIKE ? ORDER BY hour',[today+'%']))hours[x.hour.slice(11,13)]=x;
+  const days=s.all('SELECT substr(hour,1,10) day,SUM(kwh) kwh,MAX(max_w) max_w FROM breaker_hourly WHERE hour LIKE ? GROUP BY day ORDER BY day',[month+'%']);
+  const bill=s.one('SELECT home_amount,home_consumption FROM electricity WHERE home_consumption>0 AND home_amount>0 ORDER BY record_date DESC,id DESC LIMIT 1');
+  const price=bill?r(bill.home_amount/bill.home_consumption,4):null;
+  let live=null;try{live=JSON.parse((s.one("SELECT value FROM settings WHERE key='breaker_live'")||{}).value||'null')}catch{}
+  const todayKwh=r(Object.values(hours).reduce((t,x)=>t+sf(x.kwh),0),4),monthKwh=r(days.reduce((t,x)=>t+sf(x.kwh),0),4);
+  if(!live&&!days.length)return null;
+  return {live,today_kwh:todayKwh,month_kwh:monthKwh,price_per_kwh:price,today_cost:price?r(todayKwh*price,3):null,month_cost:price?r(monthKwh*price,3):null,
+    hourly:[...Array(24).keys()].map(h=>{const k=pad(h);return {hour:k,kwh:hours[k]?r(sf(hours[k].kwh),4):null}}),
+    daily:days.map(x=>({day:x.day,kwh:r(sf(x.kwh),4),max_w:x.max_w})),events:s.all('SELECT at,kind,detail FROM breaker_events ORDER BY id DESC LIMIT 12')}}
+
 // Each gas cylinder: last swap, days since, average days it lasts (phone_inbox.gas on the computer).
 function gasState(s){
   const rows=s.all('SELECT * FROM gas_swaps WHERE deleted=0 ORDER BY swapped_on,created_at'),day=v=>new Date(String(v).slice(0,10)+'T00:00:00'),today=day(nowIso());
@@ -274,7 +290,7 @@ async function catalogFrom(s,old){
   for(const x of [...meters.electricity,...meters.water]){delete x.tariff_snapshot;x.closed=!!periods.find(p=>p.id===x.period_id&&p.status==='closed')}
   const items=s.all('SELECT * FROM shopping_items WHERE deleted=0 ORDER BY in_cart,updated_at DESC');
   const reports={};for(const p of periods)if(p.status==='closed')reports[String(p.id)]=monthReport(s,p.id);
-  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,names,categories,avg_use,gas:gasState(s),reports,
+  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,names,categories,avg_use,gas:gasState(s),reports,breaker:breakerSummary(s),
     shopping:{items:items.filter(x=>!x.staple),staples:items.filter(x=>x.staple),names:s.all('SELECT DISTINCT name FROM shopping_items ORDER BY name').map(x=>x.name)},
     last_electricity:s.one('SELECT record_date,main_current,roof_current,car_current FROM electricity ORDER BY record_date DESC,id DESC LIMIT 1')||{},
     last_water:s.one('SELECT record_date,roof_current,total_consumption FROM water ORDER BY record_date DESC,id DESC LIMIT 1')||{},
