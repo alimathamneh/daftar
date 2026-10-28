@@ -70,7 +70,9 @@ addEventListener('online',net);addEventListener('offline',net);
 
 document.querySelectorAll('[data-form]').forEach(b=>b.onclick=()=>{if(!CAT)toast('ما في قوائم لسا. حدّثها من Drive لما يصير عندك نت.',true);
   ({expense:expenseForm,electricity:()=>readingForm('electricity'),water:()=>readingForm('water'),payment:paymentForm})[b.dataset.form]()});
-$('#openView').onclick=viewScreen;$('#openMeters').onclick=()=>metersScreen();$('#openDebts').onclick=debtsScreen;$('#openShop').onclick=shoppingScreen;$('#openGas').onclick=gasScreen;$('#uploadBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());$('#syncBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());
+$('#openView').onclick=viewScreen;
+// Guarded: right after an update the phone can briefly have the new code with the old page.
+$('#openMeters')&&($('#openMeters').onclick=()=>metersScreen());$('#openDebts')&&($('#openDebts').onclick=debtsScreen);$('#openShop').onclick=shoppingScreen;$('#openGas').onclick=gasScreen;$('#uploadBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());$('#syncBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());
 addEventListener('online',()=>autoSync(true));
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')autoSync()});$('#refreshBtn').onclick=e=>withBusy(e.currentTarget,()=>refreshCatalog(),'بحدّث القوائم…');$('#openSettings').onclick=openSettings;
 
