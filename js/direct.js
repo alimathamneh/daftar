@@ -198,6 +198,36 @@ function obligationSummary(s,o){
   return {paid,remaining:rest,progress:total>0?r(100*paid/total,1):0,paid_installments:number?Math.min(scheduled,number):0,total_installments:number,
     next_due:due,overdue:!!(due&&due<nowIso().slice(0,10))}}
 
+// End-of-month report of a closed month (periods.month_report on the computer, line for line).
+function monthReport(s,pid){
+  const summary=id=>{const p=s.one('SELECT * FROM periods WHERE id=?',[id]);if(!p)return null;
+    const ex=s.all('SELECT * FROM expenses WHERE period_id=? ORDER BY sort_order,id',[id]),actual=ex.reduce((t,x)=>t+sf(x.actual),0);
+    return {period:p,expenses:ex,actual,remaining:sf(p.salary)-actual}};
+  const util=(t,id)=>s.one(`SELECT * FROM ${t} WHERE period_id=? ORDER BY record_date DESC,id DESC LIMIT 1`,[id]);
+  const sm=summary(pid);if(!sm)return null;const p=sm.period;
+  const prev=s.one('SELECT * FROM periods WHERE period_date<? ORDER BY period_date DESC LIMIT 1',[p.period_date]),ps=prev?summary(prev.id):null;
+  const nxt=s.one('SELECT period_date FROM periods WHERE period_date>? ORDER BY period_date LIMIT 1',[p.period_date]),salary=sf(p.salary);
+  const totals=x=>({salary:sf(x.period.salary),actual:x.actual,remaining:x.remaining});
+  const lines=(x,id)=>{const out={};for(const e of x.expenses)out[e.name]=(out[e.name]||0)+sf(e.actual);
+    for(const [t,label] of [['electricity','Home electricity'],['water','Home water']]){const u=util(t,id);if(u&&!(label in out))out[label]=sf(u.apartment_amount)}return out};
+  const changes=[];
+  if(ps){const now=lines(sm,pid),before=lines(ps,prev.id);
+    for(const name of new Set([...Object.keys(now),...Object.keys(before)])){const d=r((now[name]||0)-(before[name]||0),3);
+      if(Math.abs(d)>=0.5)changes.push({name,diff:d,now:r(now[name]||0,3),before:r(before[name]||0,3)})}
+    changes.sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff)||(a.name<b.name?-1:a.name>b.name?1:0))}
+  const top=sm.expenses.map(e=>({name:e.name,actual:sf(e.actual),status:e.status})).sort((a,b)=>b.actual-a.actual).slice(0,5);
+  const roof={};for(const t of ['electricity','water']){const u=util(t,pid);roof[t]=u?{amount:sf(u.roof_amount),status:u.status}:null}
+  const end=nxt?nxt.period_date:'9999-12-31';
+  const paidHere=sf(s.one('SELECT COALESCE(SUM(amount),0) t FROM obligation_payments WHERE paid_on>=? AND paid_on<?',[p.period_date,end]).t);
+  let left=0;for(const o of s.all("SELECT id,total_amount FROM obligations WHERE COALESCE(status,'active')!='archived'"))
+    left+=Math.max(sf(o.total_amount)-sf(s.one('SELECT COALESCE(SUM(amount),0) t FROM obligation_payments WHERE obligation_id=?',[o.id]).t),0);
+  const ratio=salary?r(sm.actual/salary*100,1):null;
+  const ratios=s.all('SELECT id FROM periods WHERE period_date<? AND salary>0 ORDER BY period_date DESC LIMIT 6',[p.period_date]).map(x=>summary(x.id))
+    .filter(x=>x&&sf(x.period.salary)).map(x=>x.actual/sf(x.period.salary)*100);
+  return {period:{id:p.id,period_date:p.period_date,status:p.status},...totals(sm),previous:ps?totals(ps):null,changes:changes.slice(0,3),top,roof,
+    roof_total:r(Object.values(roof).reduce((t,v)=>t+(v?v.amount:0),0),3),installments:{paid:r(paidHere,3),left:r(left,3)},
+    spend_ratio:ratio,avg_ratio:ratios.length?r(ratios.reduce((a,b)=>a+b,0)/ratios.length,1):null,avg_months:ratios.length}}
+
 // Each gas cylinder: last swap, days since, average days it lasts (phone_inbox.gas on the computer).
 function gasState(s){
   const rows=s.all('SELECT * FROM gas_swaps WHERE deleted=0 ORDER BY swapped_on,created_at'),day=v=>new Date(String(v).slice(0,10)+'T00:00:00'),today=day(nowIso());
@@ -243,7 +273,8 @@ async function catalogFrom(s,old){
     water:await withV('water',s.all(`SELECT w.*,p.period_date FROM water w LEFT JOIN periods p ON p.id=w.period_id ORDER BY w.record_date DESC,w.id DESC`))};
   for(const x of [...meters.electricity,...meters.water]){delete x.tariff_snapshot;x.closed=!!periods.find(p=>p.id===x.period_id&&p.status==='closed')}
   const items=s.all('SELECT * FROM shopping_items WHERE deleted=0 ORDER BY in_cart,updated_at DESC');
-  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,names,categories,avg_use,gas:gasState(s),
+  const reports={};for(const p of periods)if(p.status==='closed')reports[String(p.id)]=monthReport(s,p.id);
+  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,names,categories,avg_use,gas:gasState(s),reports,
     shopping:{items:items.filter(x=>!x.staple),staples:items.filter(x=>x.staple),names:s.all('SELECT DISTINCT name FROM shopping_items ORDER BY name').map(x=>x.name)},
     last_electricity:s.one('SELECT record_date,main_current,roof_current,car_current FROM electricity ORDER BY record_date DESC,id DESC LIMIT 1')||{},
     last_water:s.one('SELECT record_date,roof_current,total_consumption FROM water ORDER BY record_date DESC,id DESC LIMIT 1')||{},
@@ -295,7 +326,8 @@ async function runOnce(tok,entries,key){
   const rev=crypto.randomUUID().replace(/-/g,''),manifest=JSON.parse(await zip.file('manifest.json').async('string'));
   zip.file('manifest.json',JSON.stringify({...manifest,format:3,revision:rev,parent_revision:head.revision,device_id:'iphone',created_at:new Date().toISOString()}));
   // The computer accepts only files in the archive (drive_sync.validate_snapshot): no folder entries.
-  zip.forEach((path,f)=>{if(f.dir)zip.remove(path)});
+  // Drop the entry alone: zip.remove() on a folder would also delete everything in it, the database included.
+  for(const [path,f] of Object.entries(zip.files))if(f.dir)delete zip.files[path];
   const secured=await encryptBytes(key.raw,await zip.generateAsync({type:'uint8array',compression:'DEFLATE',compressionOptions:{level:6}}));
   // New copy first, then a check that nobody moved the head meanwhile, then the head: the same order as the computer.
   const boundary='hm'+Math.random().toString(36).slice(2);
@@ -308,5 +340,29 @@ async function runOnce(tok,entries,key){
   gapi(tok,`https://www.googleapis.com/drive/v3/files/${head.blob_id}`,{method:'DELETE'}).catch(()=>{});
   return {applied,failed,catalog};
 }
-window.Direct={run,lists,salt,calcElectric,calcWater,version,Store,Home,catalogFrom,libs};
+// ---------- shared shopping list (another person's phone, phone_inbox.exchange_shared_shopping on the computer) ----------
+// A separate folder holds only item names; the other phone writes its changes to one file and reads the list from another.
+const SHOP_FOLDER='Home Monthly Shopping',SHOP_LIST='shopping-list.json',SHOP_INBOX='shopping-changes.json';
+async function putNamed(tok,folder,name,id,body){
+  if(id)return gapi(tok,`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`,{method:'PATCH',headers:{'Content-Type':'application/json'},body});
+  const boundary='hm'+Math.random().toString(36).slice(2);
+  return gapi(tok,'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+boundary},
+    body:new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({name,parents:[folder],mimeType:'application/json'})}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n`,body,`\r\n--${boundary}--`])})}
+// Apply what the other phone wrote, then publish the current list for it. Returns the newer lists, or `cat` as it was.
+async function shopExchange(tok,key,cat){
+  const folder=await findFolder(tok,SHOP_FOLDER);if(!folder)return cat;  // the list was never shared: nothing to do
+  const find=async n=>(await driveFiles(tok,`name = '${n}' and '${folder}' in parents and trashed = false`))[0]?.id||null;
+  const listId=await find(SHOP_LIST),inboxId=await find(SHOP_INBOX);
+  let ops=[];if(inboxId){try{ops=(await (await gapi(tok,`https://www.googleapis.com/drive/v3/files/${inboxId}?alt=media`)).json()).ops||[]}catch{}}
+  else await putNamed(tok,folder,SHOP_INBOX,null,'{"ops":[]}');
+  // Only changes not seen before and newer than the list: last change wins, item by item.
+  const seen=new Set(await kvGet('shopSeen')||[]),items=[...(cat?.shopping?.items||[]),...(cat?.shopping?.staples||[])];
+  const fresh=ops.filter(o=>o&&/^[A-Za-z0-9_-]{6,64}$/.test(String(o.id||''))&&!seen.has(o.id+'|'+o.updated_at)&&(()=>{const it=items.find(x=>x.id===o.id);return it?String(o.updated_at)>String(it.updated_at):!o.deleted&&!!String(o.name||'').trim()})());
+  if(fresh.length){const res=await run(tok,[{id:'shared-'+crypto.randomUUID(),type:'shopping',data:{ops:fresh},photos:[]}],key);if(res.catalog)cat=res.catalog}
+  await kvSet('shopSeen',[...new Set([...seen,...ops.map(o=>o.id+'|'+o.updated_at)])].slice(-1000));
+  const current=JSON.stringify(cat?.shopping||{});
+  if(!listId||current!==await kvGet('shopPublished')){await putNamed(tok,folder,SHOP_LIST,listId,JSON.stringify({...(cat?.shopping||{}),updated_at:new Date().toISOString()}));await kvSet('shopPublished',current)}
+  return cat}
+
+window.Direct={run,lists,salt,shopExchange,calcElectric,calcWater,version,Store,Home,catalogFrom,libs};
 })();
