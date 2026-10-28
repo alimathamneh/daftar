@@ -1,13 +1,14 @@
-/* Direct mode: while the computer is off, the iPhone edits the encrypted database copy on Drive itself.
+/* Direct mode: the iPhone reads and edits the encrypted database copy on Drive itself, whether or not the
+   computer is running.
 
-   The rules follow app.py one for one (expense, payment, reading, month and delete handlers, the electricity
+   The rules follow the server one for one (expense, payment, reading, month and delete handlers, the electricity
    and water formulas with the fee split half/half, closed months, audit log and change history), so the
-   computer opens the result as if it had made the change. The computer downloads the newer copy when it
-   starts. While the computer is running (its heartbeat on Drive is fresh), the phone uses the inbox instead.
-   Drive layout and snapshot format: drive_sync.py (head file, state-<revision>.enc, zip with manifest). */
+   computer opens the result as if it had made the change. A running computer takes the newer copy in within
+   half a minute (workers.phone_worker); it uploads its own changes a few seconds after making them.
+   Drive layout and snapshot format: server/sync/drive_sync.py (head file, state-<revision>.enc, zip with manifest). */
 (() => {
 'use strict';
-const HEAD='home-monthly-head.json',HEARTBEAT='pc-online.json';
+const HEAD='home-monthly-head.json';
 const EDITABLE={expense:['name','category','section','budget','actual','paid_amount','status','payment_date','notes'],
   electricity:['record_date','bill_date','main_current','roof_current','car_current','invoice_amount','fees','notes'],
   water:['record_date','bill_date','total_consumption','roof_current','invoice_amount','notes'],payment:['amount','paid_on','notes'],period:['salary','notes']};
@@ -186,24 +187,63 @@ class Home{
   }
 }
 
+// Paid, remaining and the next due date of a debt (obligations.obligation_summary on the computer).
+const shiftDue=(day,months)=>{const [y0,m0,d0]=day.split('-').map(Number),t=m0-1+months,y=y0+Math.floor(t/12),m=((t%12)+12)%12+1,last=new Date(y,m,0).getDate();
+  return `${y}-${pad(m)}-${pad(Math.min(d0,last))}`};
+function obligationSummary(s,o){
+  const res=s.one('SELECT COALESCE(SUM(amount),0) total FROM obligation_payments WHERE obligation_id=?',[o.id]);
+  const paid=r(sf(res.total),3),total=sf(o.total_amount),rest=r(Math.max(0,total-paid),3),monthly=sf(o.monthly_amount);
+  const scheduled=monthly>0?Math.max(0,Math.floor((paid+0.00001)/monthly)):0,number=Math.trunc(sf(o.planned_installments))||(monthly>0?Math.ceil(total/monthly):0);
+  let due=null;if(rest>.0005&&(o.status||'active')==='active'&&o.first_due_date)due=o.kind==='installment'&&monthly>0?shiftDue(o.first_due_date,scheduled):o.first_due_date;
+  return {paid,remaining:rest,progress:total>0?r(100*paid/total,1):0,paid_installments:number?Math.min(scheduled,number):0,total_installments:number,
+    next_due:due,overdue:!!(due&&due<nowIso().slice(0,10))}}
+
+// Each gas cylinder: last swap, days since, average days it lasts (phone_inbox.gas on the computer).
+function gasState(s){
+  const rows=s.all('SELECT * FROM gas_swaps WHERE deleted=0 ORDER BY swapped_on,created_at'),day=v=>new Date(String(v).slice(0,10)+'T00:00:00'),today=day(nowIso());
+  const out=[];for(const name of [...new Set(rows.map(x=>x.cylinder))]){
+    const days=rows.filter(x=>x.cylinder===name).map(x=>day(x.swapped_on)),gaps=[];
+    for(let i=1;i<days.length;i++){const g=Math.round((days[i]-days[i-1])/864e5);if(g>0)gaps.push(g)}
+    const last=days[days.length-1],since=Math.round((today-last)/864e5),avg=gaps.length?r(gaps.reduce((a,b)=>a+b,0)/gaps.length,1):null;
+    out.push({cylinder:name,last:`${last.getFullYear()}-${pad(last.getMonth()+1)}-${pad(last.getDate())}`,since,avg,swaps:days.length,left:avg==null?null:Math.round(avg-since)})}
+  const year=nowIso().slice(0,4),spent=rows.filter(x=>String(x.swapped_on).slice(0,4)===year).reduce((t,x)=>t+sf(x.price),0);
+  return {cylinders:out.length?out:[{cylinder:'المطبخ',last:null,since:null,avg:null,swaps:0,left:null}],swaps:rows.slice().reverse().slice(0,40),spent_this_year:r(spent,3)}}
+
 // ---------- lists for the phone, rebuilt from the edited database (same shape as phone_inbox.build_catalog) ----------
 async function catalogFrom(s,old){
   const setting=(k,d)=>(s.one('SELECT value FROM settings WHERE key=?',[k])||{value:d}).value;
   const withV=async(kind,rows)=>{for(const x of rows)x.v=await version(kind,x);return rows};
-  const periods=await withV('period',s.all('SELECT id,period_date,status,salary,notes FROM periods ORDER BY period_date DESC LIMIT 12'));
+  const periods=await withV('period',s.all('SELECT id,period_date,status,salary,notes FROM periods ORDER BY period_date DESC'));
   const expenses={},readings={},summary={};
   for(const p of periods){const k=String(p.id);
     expenses[k]=await withV('expense',s.all('SELECT id,name,category,section,budget,actual,paid_amount,status,payment_date,notes,0 AS auto_calculated FROM expenses WHERE period_id=? ORDER BY sort_order,id',[p.id]));
     readings[k]={electricity:await withV('electricity',s.all(`SELECT id,${EDITABLE.electricity.join(',')},status,apartment_amount,home_amount,car_amount,roof_amount,roof_consumption,roof_prev FROM electricity WHERE period_id=? ORDER BY record_date DESC,id DESC`,[p.id])),
       water:await withV('water',s.all(`SELECT id,${EDITABLE.water.join(',')},status,apartment_amount,roof_amount,roof_consumption,roof_prev FROM water WHERE period_id=? ORDER BY record_date DESC,id DESC`,[p.id]))};
     const actual=expenses[k].reduce((t,e)=>t+sf(e.actual),0),paid=expenses[k].reduce((t,e)=>t+Math.min(sf(e.paid_amount),sf(e.actual)),0);
-    summary[k]={salary:sf(p.salary),actual:r(actual,3),paid:r(paid,3),unpaid:r(actual-paid,3),remaining:r(sf(p.salary)-actual,3),utilities:old?.summary?.[k]?.utilities||null}}
+    const util=(t,cols)=>s.one(`SELECT ${cols} FROM ${t} WHERE period_id=? ORDER BY record_date DESC,id DESC LIMIT 1`,[p.id]);
+    summary[k]={salary:sf(p.salary),actual:r(actual,3),paid:r(paid,3),unpaid:r(actual-paid,3),remaining:r(sf(p.salary)-actual,3),
+      utilities:{electricity:util('electricity','apartment_amount,home_amount,car_amount,roof_amount,apartment_consumption,roof_consumption,status,invoice_amount'),
+        water:util('water','apartment_amount,roof_amount,apartment_consumption,roof_consumption,status,invoice_amount')}}}
+  // Names and categories for the expense form, typical meter use for the "looks too high" warning (phone_inbox.build_catalog).
+  const names=s.all(`SELECT name,category,MAX(section) section,MAX(actual) actual FROM expenses
+    WHERE period_id IN (SELECT id FROM periods ORDER BY period_date DESC LIMIT 6) GROUP BY name,category ORDER BY name`);
+  let configured=[];try{const raw=setting('categories','[]');configured=raw.trim().startsWith('[')?JSON.parse(raw):raw.split(',')}catch{}
+  const categories=[...new Set([...names.map(n=>n.category).filter(Boolean),...configured.map(x=>String(x).trim()).filter(Boolean)])];
+  const avgE=s.one('SELECT AVG(total_consumption) main,AVG(roof_consumption) roof,AVG(car_consumption) car FROM (SELECT * FROM electricity ORDER BY record_date DESC LIMIT 6)')||{};
+  const avgW=s.one('SELECT AVG(roof_consumption) w FROM (SELECT * FROM water ORDER BY record_date DESC LIMIT 6)')||{};
+  const avg_use={main:r(sf(avgE.main),1),roof:r(sf(avgE.roof),1),car:r(sf(avgE.car),1),water_roof:r(sf(avgW.w),1)};
   const obligations=[];for(const o of s.all("SELECT * FROM obligations WHERE COALESCE(status,'active')!='archived' ORDER BY name")){
-    const paid=s.one('SELECT COALESCE(SUM(amount),0) t FROM obligation_payments WHERE obligation_id=?',[o.id]).t,remaining=r(sf(o.total_amount)-sf(paid),3);
-    obligations.push({id:o.id,name:o.name,kind:o.kind,monthly_amount:o.monthly_amount,total:o.total_amount,remaining,open:remaining>.0005,
-      payments:await withV('payment',s.all('SELECT id,amount,paid_on,notes,period_id FROM obligation_payments WHERE obligation_id=? ORDER BY paid_on DESC,id DESC LIMIT 12',[o.id]))})}
+    const sm=obligationSummary(s,o);
+    obligations.push({id:o.id,name:o.name,kind:o.kind,counterparty:o.counterparty||'',monthly_amount:o.monthly_amount,total:o.total_amount,
+      paid:sm.paid,remaining:sm.remaining,open:sm.remaining>.0005,progress:sm.progress,first_due_date:o.first_due_date,next_due_date:sm.next_due,overdue:sm.overdue,
+      paid_installments:sm.paid_installments,total_installments:sm.total_installments,notes:o.notes||'',
+      payments:await withV('payment',s.all('SELECT id,amount,paid_on,notes,period_id,expense_id FROM obligation_payments WHERE obligation_id=? ORDER BY paid_on DESC,id DESC',[o.id]))})}
+  // Every reading with all its numbers, newest first, for the readings history screen.
+  const meters={electricity:await withV('electricity',s.all(`SELECT e.*,p.period_date FROM electricity e LEFT JOIN periods p ON p.id=e.period_id ORDER BY e.record_date DESC,e.id DESC`)),
+    water:await withV('water',s.all(`SELECT w.*,p.period_date FROM water w LEFT JOIN periods p ON p.id=w.period_id ORDER BY w.record_date DESC,w.id DESC`))};
+  for(const x of [...meters.electricity,...meters.water]){delete x.tariff_snapshot;x.closed=!!periods.find(p=>p.id===x.period_id&&p.status==='closed')}
   const items=s.all('SELECT * FROM shopping_items WHERE deleted=0 ORDER BY in_cart,updated_at DESC');
-  return {...old,generated_at:new Date().toISOString(),periods,expenses,readings,summary,obligations,
+  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,names,categories,avg_use,gas:gasState(s),
     shopping:{items:items.filter(x=>!x.staple),staples:items.filter(x=>x.staple),names:s.all('SELECT DISTINCT name FROM shopping_items ORDER BY name').map(x=>x.name)},
     last_electricity:s.one('SELECT record_date,main_current,roof_current,car_current FROM electricity ORDER BY record_date DESC,id DESC LIMIT 1')||{},
     last_water:s.one('SELECT record_date,roof_current,total_consumption FROM water ORDER BY record_date DESC,id DESC LIMIT 1')||{},
@@ -218,29 +258,31 @@ async function locate(tok){
   const cur=await findFolder(tok,'Current Sync',root);
   for(const folder of [cur,root].filter(Boolean)){const f=(await driveFiles(tok,`name = '${HEAD}' and '${folder}' in parents and trashed = false`))[0];if(f)return {root,folder,headId:f.id}}
   throw new Error('لسا ما في نسخة من البرنامج على Drive')}
-// The computer writes pc-online.json every minute while it runs.
-async function computerOnline(tok,root){const f=(await driveFiles(tok,`name = '${HEARTBEAT}' and '${root}' in parents and trashed = false`))[0];
-  return !!f&&Date.now()-Date.parse(f.modifiedTime)<150000}
 const readHead=async(tok,id)=>(await gapi(tok,`https://www.googleapis.com/drive/v3/files/${id}?alt=media`)).json();
+// The salt of the Drive copy, so the phone can make its key from the password without anything from the computer.
+async function salt(tok){const {headId}=await locate(tok);return (await readHead(tok,headId)).salt}
 
 async function openCopy(tok,headId,key){
-  const head=await readHead(tok,headId);if(head.salt!==key.salt)throw new Error('كلمة التشفير على الآيفون مش نفس اللي بالبرنامج');
+  const head=await readHead(tok,headId);if(head.salt!==key.salt)throw Object.assign(new Error('كلمة التشفير على الآيفون مش نفس اللي بالبرنامج'),{badKey:true});
   const blob=new Uint8Array(await (await gapi(tok,`https://www.googleapis.com/drive/v3/files/${head.blob_id}?alt=media`)).arrayBuffer());
   if(hex(await crypto.subtle.digest('SHA-256',blob))!==head.sha256)throw new Error('النسخة على Drive مش سليمة');
-  const SQL=await libs(),zip=await JSZip.loadAsync(await decryptBytes(key.raw,blob));
+  let plain;try{plain=await decryptBytes(key.raw,blob)}catch{throw Object.assign(new Error('كلمة التشفير غلط، جرّب مرة ثانية'),{badKey:true})}
+  const SQL=await libs(),zip=await JSZip.loadAsync(plain);
   return {head,zip,db:new SQL.Database(await zip.file('database/home_system.db').async('uint8array'))}}
 // Nothing is automatic any more (same as the computer's start-up): every line is an ordinary expense.
 const unlockAll=db=>{db.run('UPDATE expenses SET auto_calculated=0 WHERE auto_calculated=1');db.run('UPDATE expense_template_items SET auto_calculated=0 WHERE auto_calculated=1')};
-// Computer off: the lists straight from the Drive copy (its own catalog is older). null when the computer is on.
+// The lists straight from the Drive copy. The computer uploads its changes a few seconds after making them.
 async function lists(tok,key,old){
-  const {root,headId}=await locate(tok);
-  if(await computerOnline(tok,root))return null;
+  const {headId}=await locate(tok);
   const {db}=await openCopy(tok,headId,key);
   try{return await catalogFrom(new Store(db),old)}finally{db.close()}}
-// Apply `entries` straight into the Drive copy. Returns {applied:[ids], failed:{id:reason}} or null when the computer is on.
+// Apply `entries` straight into the Drive copy. Returns {applied:[ids], failed:{id:reason}, catalog}.
+// If the computer saved a copy at the same moment, start again once from its copy.
 async function run(tok,entries,key){
-  const {root,folder,headId}=await locate(tok);
-  if(await computerOnline(tok,root))return null;
+  try{return await runOnce(tok,entries,key)}
+  catch(err){if(!err.moved)throw err;return runOnce(tok,entries,key)}}
+async function runOnce(tok,entries,key){
+  const {folder,headId}=await locate(tok);
   const {head,zip,db}=await openCopy(tok,headId,key),s=new Store(db);
   const actor=(s.one("SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1")||{}).id||null,home=new Home(s,zip,actor);
   db.create_function('home_event_id',()=>home.event);db.create_function('home_actor_id',()=>actor);unlockAll(db);
@@ -260,11 +302,11 @@ async function run(tok,entries,key){
   const body=new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({name:`state-${rev}.enc`,parents:[folder]})}\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`,secured,`\r\n--${boundary}--`]);
   const created=await (await gapi(tok,'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+boundary},body})).json();
   const latest=await readHead(tok,headId);
-  if(latest.revision!==head.revision){await gapi(tok,`https://www.googleapis.com/drive/v3/files/${created.id}`,{method:'DELETE'}).catch(()=>{});throw new Error('النسخة تغيّرت وإحنا بنعدّل. جرّب مرة ثانية')}
+  if(latest.revision!==head.revision){await gapi(tok,`https://www.googleapis.com/drive/v3/files/${created.id}`,{method:'DELETE'}).catch(()=>{});throw Object.assign(new Error('النسخة تغيّرت وإحنا بنعدّل. جرّب مرة ثانية'),{moved:true})}
   const next={revision:rev,blob_id:created.id,created_at:new Date().toISOString(),device_id:'iphone',salt:head.salt,sha256:hex(await crypto.subtle.digest('SHA-256',secured))};
   await gapi(tok,`https://www.googleapis.com/upload/drive/v3/files/${headId}?uploadType=media`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(next)});
   gapi(tok,`https://www.googleapis.com/drive/v3/files/${head.blob_id}`,{method:'DELETE'}).catch(()=>{});
   return {applied,failed,catalog};
 }
-window.Direct={run,lists,calcElectric,calcWater,version,Store,Home,catalogFrom,libs};
+window.Direct={run,lists,salt,calcElectric,calcWater,version,Store,Home,catalogFrom,libs};
 })();
