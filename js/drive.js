@@ -26,35 +26,28 @@ async function findFolder(tok,name,parent){const query=`name = '${q(name)}' and 
 async function inboxFolder(tok){const root=await findFolder(tok,'Home Monthly System');const inbox=root&&await findFolder(tok,'Phone Inbox',root);
   if(!inbox)throw new Error('ما لقيت مجلد الآيفون على Drive. من البرنامج عالكمبيوتر افتح "من الآيفون" واضغط "تحديث" مرة أول.');return inbox}
 
-// ---------- lists from the computer (encrypted catalog) ----------
+// ---------- lists: read straight from the database copy on Drive ----------
 let CAT=null;
+// The key comes from the sync password and the salt of the Drive copy; asked once, then kept on the phone.
+async function driveKey(tok,silent){
+  const salt=await Direct.salt(tok);let key=await kvGet('key');
+  if(key&&key.salt===salt)return key;if(silent)return null;
+  const pass=prompt('اكتب كلمة تشفير المزامنة (نفس اللي بالبرنامج عالكمبيوتر):');if(!pass)return null;
+  toast('بجهّز المفتاح… لحظة');return {salt,raw:await deriveRaw(pass,salt)}}
 // silent: the automatic run — no Google page, no password prompt, no messages unless something arrived.
 async function refreshCatalog(silent=false){
   if(!navigator.onLine)return silent?null:toast('بدك إنترنت لتحديث القوائم',true);
   if(silent&&!(await kvGet('key')))return;
   const tok=silent?await validToken():await token('refresh');if(!tok)return;
   try{
-    const inbox=await inboxFolder(tok);
-    const r=await gapi(tok,'https://www.googleapis.com/drive/v3/files?'+new URLSearchParams({q:`name = 'catalog-for-phone.json' and '${inbox}' in parents and trashed = false`,fields:'files(id,modifiedTime)',orderBy:'modifiedTime desc',pageSize:'1'}));
-    const f=(await r.json()).files?.[0];if(!f)throw new Error('لسا ما في قوائم. اضغط "تحديث" من البرنامج عالكمبيوتر.');
-    const wrap=await (await gapi(tok,`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`)).json();
-    let key=await kvGet('key');
-    if(silent&&(!key||key.salt!==wrap.salt))return;
-    if(!key||key.salt!==wrap.salt){const pass=prompt('اكتب كلمة تشفير المزامنة (نفس اللي بالبرنامج عالكمبيوتر):');if(!pass)return;
-      toast('بجهّز المفتاح… لحظة');key={salt:wrap.salt,raw:await deriveRaw(pass,wrap.salt)}}
-    let data;try{data=JSON.parse(new TextDecoder().decode(await decryptBytes(key.raw,b64d(wrap.payload))))}
-    catch{await kvDel('key');throw new Error('كلمة التشفير غلط، جرّب مرة ثانية')}
-    // Computer off: its catalog predates the phone's direct edits, so read the Drive copy instead.
-    try{const fresh=await Direct.lists(tok,key,data);if(fresh)data=fresh}catch(err){if(err.reauth)throw err;console.warn('lists',err)}
-    // Never go back to an older list than the one already on the phone.
-    if(CAT&&Date.parse(CAT.generated_at)>Date.parse(data.generated_at))data=CAT;
-    const changed=!CAT||CAT.generated_at!==data.generated_at;
-    await kvSet('key',key);await kvSet('catalog',data);CAT=data;await pruneShopping();await dropDeleted();renderHome();if(!silent||changed)toast('تم تحديث القوائم ✓');
+    const key=await driveKey(tok,silent);if(!key)return;
+    let data;try{data=await Direct.lists(tok,key,CAT)}catch(err){if(err.badKey)await kvDel('key');throw err}
+    const changed=!CAT||JSON.stringify({...CAT,generated_at:0})!==JSON.stringify({...data,generated_at:0});
+    await kvSet('key',key);await kvSet('catalog',data);CAT=data;await pruneShopping();renderHome();if(!silent||changed)toast('تم تحديث القوائم ✓');
   }catch(e){if(e.reauth){if(!silent)signIn('refresh');else renderHome()}else if(!silent)toast(e.message,true)}
 }
 
-// ---------- upload: one encrypted file per entry; the computer decides what to add ----------
-const blobB64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=()=>rej(r.error);r.readAsDataURL(b)});
+// ---------- saving: entries go straight into the database copy on Drive ----------
 let uploading=false;
 async function upload(silent=false){
   if(uploading)return;
@@ -63,36 +56,16 @@ async function upload(silent=false){
   if(!navigator.onLine)return silent?null:toast('بدك إنترنت للرفع',true);
   const key=await kvGet('key');if(!key)return silent?null:toast('اضغط "تحديث القوائم" أول عشان تدخل كلمة التشفير',true);
   const tok=silent?await validToken():await token('upload');if(!tok)return renderHome();
-  uploading=true;const btn=$('#uploadBtn');btn.disabled=true;let done=0,direct=0,list=pending;
+  uploading=true;const btn=$('#uploadBtn');btn.disabled=true;btn.textContent=`⬆️ بحفظ ${pending.length}…`;
   try{
-    // Computer off: change the Drive copy of the database directly. Anything it refuses goes the usual way.
-    try{const res=await Direct.run(tok,pending,key);
-      if(res){const now=new Date().toISOString();
-        for(const e of pending)if(res.applied.includes(e.id)){e.uploaded_at=now;e.direct='applied';e.photo_count=(e.photos||[]).length;e.photos=[];await putEntry(e);direct++}
-        if(res.catalog){CAT=res.catalog;await kvSet('catalog',CAT)}
-        // A refusal here (closed month, paid above actual, changed meanwhile) would be refused on the computer too:
-        // it stays on the phone with the reason instead of waiting there for nothing.
-        for(const e of pending)if(res.failed[e.id]){e.rejected=res.failed[e.id];await putEntry(e)}
-        list=pending.filter(e=>!res.applied.includes(e.id)&&!res.failed[e.id]);
-        if(direct)toast(`انحفظ بالبرنامج مباشرة ✓ (${direct})`+(list.length?` · ${list.length} رح يستنوا الكمبيوتر`:''));
-        for(const [id,why] of Object.entries(res.failed))console.warn('direct',id,why)}
-    }catch(err){if(err.reauth)throw err;toast('ما قدرت أعدّل مباشرة ('+err.message+')، رح يوصل عن طريق الكمبيوتر',true)}
-    const inbox=list.length?await inboxFolder(tok):null;
-    for(const e of list){
-      btn.textContent=`⬆️ برفع ${done+1} من ${list.length}…`;
-      const photos=[];for(const p of e.photos||[])photos.push({name:p.name,type:p.blob.type||'image/jpeg',data:await blobB64(p.blob)});
-      const body={id:e.id,type:e.type,created_at:e.created_at,period_id:e.period_id,period_label:e.period_label,device:'iPhone',data:e.type==='shopping'?{ops:Object.values(e.data.ops||{})}:e.data,photos};
-      const payload=b64e(await encryptBytes(key.raw,new TextEncoder().encode(JSON.stringify(body))));
-      const meta={name:`phone-${e.id}.json`,parents:[inbox],mimeType:'application/json'};
-      const boundary='hm'+Math.random().toString(36).slice(2);
-      const multipart=new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n`,
-        JSON.stringify({format:'home-monthly-phone-entry',id:e.id,payload}),`\r\n--${boundary}--`]);
-      await gapi(tok,'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+boundary},body:multipart});
-      // Keep a light copy for the list; the photos are on Drive now.
-      e.uploaded_at=new Date().toISOString();e.photo_count=(e.photos||[]).length;e.photos=[];await putEntry(e);done++;
-    }
-    if(done)toast(`تم رفع ${done} ✓ الكمبيوتر بيضيفهم أول ما يشتغل`);
-  }catch(err){if(err.reauth&&silent){if(done)toast(`تم رفع ${done} ✓`)}else{toast((done?`انرفع ${done}. `:'')+err.message,true);if(err.reauth)signIn('upload')}}
+    const res=await Direct.run(tok,pending,key),now=new Date().toISOString();let done=0;
+    for(const e of pending)if(res.applied.includes(e.id)){e.uploaded_at=now;e.direct='applied';e.photo_count=(e.photos||[]).length;e.photos=[];await putEntry(e);done++}
+    if(res.catalog){CAT=res.catalog;await kvSet('catalog',CAT)}
+    // A refusal (closed month, paid above actual, changed meanwhile) stays on the phone with the reason.
+    for(const e of pending)if(res.failed[e.id]){e.rejected=res.failed[e.id];await putEntry(e)}
+    const failed=Object.keys(res.failed).length;
+    if(done||failed)toast((done?`انحفظ بالبرنامج ✓ (${done})`:'')+(failed?`${done?' · ':''}${failed} ما انضافوا، شوف السبب تحت`:''),!done);
+  }catch(err){if(err.reauth&&!silent)signIn('upload');else if(!silent||!err.reauth)toast(err.message,true)}
   finally{uploading=false;btn.disabled=false;renderHome()}
 }
 // Right after saving something: upload now; if the Google sign-in has run out, sign in again straight away
