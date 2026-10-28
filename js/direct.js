@@ -231,15 +231,18 @@ function monthReport(s,pid){
 // The AC breaker, as the computer copied it from the Tuya cloud (breaker.summary): today and this month, by hour
 // and by day. A report covers about the half hour before it, so it counts in the hour of its middle.
 // Read only: the phone can't reach the breaker, which is on the home network.
-function breakerSummary(s){
-  if(!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name='breaker_energy'"))return null;
-  const today=nowIso().slice(0,10),B="datetime(at,'-15 minutes')";
-  // The month starts on the chosen day (breaker.month_start_day / cycle on the computer).
+// The ACs' month: it starts on the chosen day (breaker.month_start_day / cycle on the computer).
+function acMonth(s){
+  const today=nowIso().slice(0,10);
   let sd=1;for(const k of ['breaker_month_start','month_start_day']){const v=parseInt((s.one('SELECT value FROM settings WHERE key=?',[k])||{}).value,10);if(v>=1&&v<=28){sd=v;break}}
   const on=(y,m)=>{const t=new Date(y,m-1+0,1);const yy=t.getFullYear(),mm=t.getMonth()+1;return `${yy}-${pad(mm)}-${pad(Math.min(sd,new Date(yy,mm,0).getDate()))}`};
   const [ty,tm,td]=today.split('-').map(Number),first=td>=sd?on(ty,tm):on(ty,tm-1);
   const [fy,fm]=first.split('-').map(Number),nextStart=on(fy,fm+1),lastD=new Date(nextStart+'T00:00:00');lastD.setDate(lastD.getDate()-1);
-  const last=`${lastD.getFullYear()}-${pad(lastD.getMonth()+1)}-${pad(lastD.getDate())}`;
+  return {sd,first,last:`${lastD.getFullYear()}-${pad(lastD.getMonth()+1)}-${pad(lastD.getDate())}`};
+}
+function breakerSummary(s){
+  if(!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name='breaker_energy'"))return null;
+  const today=nowIso().slice(0,10),B="datetime(at,'-15 minutes')",{sd,first,last}=acMonth(s);
   const hours={};for(const x of s.all(`SELECT strftime('%H',${B}) h,SUM(wh) wh FROM breaker_energy WHERE date(${B})=? GROUP BY h`,[today]))hours[x.h]={kwh:x.wh/1000};
   const days=s.all(`SELECT date(${B}) day,SUM(wh)/1000.0 kwh FROM breaker_energy WHERE date(${B}) BETWEEN ? AND ? GROUP BY day ORDER BY day`,[first,last]);
   const lastReport=(s.one('SELECT MAX(at) m FROM breaker_energy')||{}).m||null;
@@ -251,6 +254,24 @@ function breakerSummary(s){
   return {live,last_report:lastReport,month_start_day:sd,month_first:first,month_last:last,today_kwh:todayKwh,month_kwh:monthKwh,price_per_kwh:price,today_cost:price?r(todayKwh*price,3):null,month_cost:price?r(monthKwh*price,3):null,
     hourly:[...Array(24).keys()].map(h=>{const k=pad(h);return {hour:k,kwh:hours[k]?r(sf(hours[k].kwh),3):null}}),
     daily:days.map(x=>({day:x.day,kwh:r(sf(x.kwh),3)})),events:s.all('SELECT at,kind,detail FROM breaker_events ORDER BY id DESC LIMIT 12')}}
+
+// The bedroom Samsung AC, as the computer recorded it from SmartThings (samsung.summary): each rise of its energy
+// meter is already at the time it was used, so it counts in that hour. Same month as the living-room AC's.
+function samsungSummary(s){
+  if(!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name='samsung_energy'"))return null;
+  let live=null;try{live=JSON.parse((s.one("SELECT value FROM settings WHERE key='samsung_live'")||{}).value||'null')}catch{}
+  const lastReport=(s.one('SELECT MAX(upto) m FROM samsung_energy WHERE wh>0')||{}).m||null;
+  if(!live&&!lastReport)return null;
+  const today=nowIso().slice(0,10),{sd,first,last}=acMonth(s);
+  const hours={};for(const x of s.all("SELECT strftime('%H',at) h,SUM(wh) wh FROM samsung_energy WHERE date(at)=? GROUP BY h",[today]))hours[x.h]=x.wh/1000;
+  const days=s.all('SELECT date(at) day,SUM(wh)/1000.0 kwh FROM samsung_energy WHERE date(at) BETWEEN ? AND ? GROUP BY day ORDER BY day',[first,last]);
+  const bill=s.one('SELECT home_amount,home_consumption FROM electricity WHERE home_consumption>0 AND home_amount>0 ORDER BY record_date DESC,id DESC LIMIT 1');
+  const price=bill?r(bill.home_amount/bill.home_consumption,4):null;
+  const todayKwh=r(Object.values(hours).reduce((t,v)=>t+sf(v),0),3),monthKwh=r(days.reduce((t,x)=>t+sf(x.kwh),0),3);
+  return {live,last_report:lastReport,month_start_day:sd,month_first:first,month_last:last,today_kwh:todayKwh,month_kwh:monthKwh,price_per_kwh:price,
+    today_cost:price?r(todayKwh*price,3):null,month_cost:price?r(monthKwh*price,3):null,
+    hourly:[...Array(24).keys()].map(h=>{const k=pad(h);return {hour:k,kwh:k in hours?r(sf(hours[k]),3):null}}),
+    daily:days.map(x=>({day:x.day,kwh:r(sf(x.kwh),3)})),events:s.all('SELECT at,kind,detail FROM samsung_events ORDER BY id DESC LIMIT 12')}}
 
 // Each gas cylinder: last swap, days since, average days it lasts (phone_inbox.gas on the computer).
 function gasState(s){
@@ -298,7 +319,7 @@ async function catalogFrom(s,old){
   for(const x of [...meters.electricity,...meters.water]){delete x.tariff_snapshot;x.closed=!!periods.find(p=>p.id===x.period_id&&p.status==='closed')}
   const items=s.all('SELECT * FROM shopping_items WHERE deleted=0 ORDER BY in_cart,updated_at DESC');
   const reports={};for(const p of periods)if(p.status==='closed')reports[String(p.id)]=monthReport(s,p.id);
-  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,names,categories,avg_use,gas:gasState(s),reports,breaker:breakerSummary(s),
+  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,names,categories,avg_use,gas:gasState(s),reports,breaker:breakerSummary(s),samsung:samsungSummary(s),
     shopping:{items:items.filter(x=>!x.staple),staples:items.filter(x=>x.staple),names:s.all('SELECT DISTINCT name FROM shopping_items ORDER BY name').map(x=>x.name)},
     last_electricity:s.one('SELECT record_date,main_current,roof_current,car_current FROM electricity ORDER BY record_date DESC,id DESC LIMIT 1')||{},
     last_water:s.one('SELECT record_date,roof_current,total_consumption FROM water ORDER BY record_date DESC,id DESC LIMIT 1')||{},
