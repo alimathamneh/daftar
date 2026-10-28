@@ -207,6 +207,7 @@ async function catalogFrom(s,old){
     shopping:{items:items.filter(x=>!x.staple),staples:items.filter(x=>x.staple),names:s.all('SELECT DISTINCT name FROM shopping_items ORDER BY name').map(x=>x.name)},
     last_electricity:s.one('SELECT record_date,main_current,roof_current,car_current FROM electricity ORDER BY record_date DESC,id DESC LIMIT 1')||{},
     last_water:s.one('SELECT record_date,roof_current,total_consumption FROM water ORDER BY record_date DESC,id DESC LIMIT 1')||{},
+    tariffs:{electricity:new Home(s).tariff('electricity'),water:new Home(s).tariff('water')},
     month_start_day:Number(setting('month_start_day','25'))||25}
 }
 
