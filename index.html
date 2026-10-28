@@ -403,13 +403,26 @@ function readingForm(kind){
    <div class="field"><label>إجمالي الفاتورة (اختياري)</label><input id="fInvoice" type="number" inputmode="decimal" step="0.001"></div>`}
    <div class="field"><label>ملاحظات</label><input id="fNotes"></div>
    <div id="readWarn" class="warn" style="margin-bottom:10px"></div>
+   <div id="calcBox" style="margin-bottom:10px"></div>
    ${photoBlock('صور العدادات والفاتورة')}
    <button class="btn" id="saveBtn">احفظ</button></div>`);
   const avg=CAT?.avg_use||{};
   const check=()=>{const w=[];const test=(id,k,n,a)=>{const v=numv(id);if(v==null||last?.[k]==null)return;const use=v-Number(last[k]);
       if(use<0)w.push(`${n} أقل من القراءة السابقة`);else if(a>0&&use>2*a)w.push(`${n}: الاستهلاك ${Math.round(use)} أكثر من ضعف المعدّل (${Math.round(a)})`)};
     if(el){test('fMain','main_current','العداد الرئيسي',avg.main);test('fCar','car_current','عداد السيارة',avg.car);test('fRoof','roof_current','عداد الروف',avg.roof)}
-    else test('fRoof','roof_current','عداد الروف',avg.water_roof);$('#readWarn').textContent=w.join(' · ')};
+    else test('fRoof','roof_current','عداد الروف',avg.water_roof);$('#readWarn').textContent=w.join(' · ');preview()};
+  // Live bill preview with the same formulas the PC uses; nothing is saved until "احفظ".
+  const preview=()=>{const box=$('#calcBox'),t=CAT?.tariffs?.[kind]||undefined,L=last||{},k3=x=>`${(+x).toFixed(3)} JOD`,q=x=>Math.round(+x*1000)/1000;
+    let rows=[];
+    if(el){const mc=numv('fMain');if(mc==null||L.main_current==null){box.innerHTML='';return}
+      const c=Direct.calcElectric({main_prev:L.main_current,main_current:mc,roof_prev:L.roof_current,roof_current:numv('fRoof')??L.roof_current,car_prev:L.car_current,car_current:numv('fCar')??L.car_current,fees:numv('fFees')||0,invoice_amount:numv('fInvoice')},t);
+      rows=[['الاستهلاك الكلي',`${q(c.total_consumption)} kWh`],['البيت',`${q(c.home_consumption)} kWh · ${k3(c.home_amount)}`],['السيارة',`${q(c.car_consumption)} kWh · ${k3(c.car_amount)}`],['الروف',`${q(c.roof_consumption)} kWh · ${k3(c.roof_amount)}`],['المجموع',k3(c.apartment_amount+c.roof_amount)]];
+      if(numv('fInvoice')!=null)rows.push(['الفرق عن الفاتورة',k3(c.check_diff)])}
+    else{const tot=numv('fTotal');if(tot==null){box.innerHTML='';return}
+      const c=Direct.calcWater({total_consumption:tot,roof_prev:L.roof_current,roof_current:numv('fRoof')??L.roof_current,invoice_amount:numv('fInvoice')},t);
+      rows=[['البيت',`${q(c.apartment_consumption)} م³ · ${k3(c.apartment_amount)}`],['الروف',`${q(c.roof_consumption)} م³ · ${k3(c.roof_amount)}`],['المجموع',k3(c.calculated_bill)]];
+      if(numv('fInvoice')!=null)rows.push(['الفرق عن الفاتورة',k3(c.check_diff)])}
+    box.innerHTML=`<div class="card" style="padding:10px"><b>🧮 الحساب</b>${rows.map(([a,b])=>`<div style="display:flex;justify-content:space-between;gap:8px"><span>${a}</span><span class="num">${b}</span></div>`).join('')}${t?'':'<small class="hint">بالتعرفة الافتراضية — حدّث القوائم من Drive لتاخذ تعرفتك</small>'}</div>`};
   sheet.querySelectorAll('input[type=number]').forEach(i=>i.addEventListener('input',check));
   // "Read from photo" under each meter: the photo is kept with the reading and the number is only a suggestion.
   const meters=el?[['fMain','main_current'],['fRoof','roof_current'],['fCar','car_current']]:[['fRoof','roof_current']];
