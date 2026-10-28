@@ -214,7 +214,7 @@ function acScreen(){
      <p class="hint" style="margin:6px 0 0">آخر قراءة من الكمبيوتر: <span dir="ltr">${esc(String(L.at||'').slice(0,16))}</span></p>`:'<p class="hint">ما في قراءة لسا.</p>'}
      ${b.last_report?`<p class="hint" style="margin:4px 0 0">آخر تقرير استهلاك من Tuya: <span dir="ltr">${esc(b.last_report.slice(0,16))}</span></p>`:''}</div>
    <div class="kpis"><div class="kpi"><small>اليوم</small><b class="num">${num(b.today_kwh,2)} kWh</b><small>${cost(b.today_cost)}</small></div>
-    <div class="kpi"><small>هالشهر</small><b class="num">${num(b.month_kwh,2)} kWh</b><small>${cost(b.month_cost)}</small></div></div>
+    <div class="kpi"><small>هالشهر${b.month_first?` (من ${dmy(b.month_first).slice(0,5)})`:''}</small><b class="num">${num(b.month_kwh,2)} kWh</b><small>${cost(b.month_cost)}</small></div></div>
    <div class="card"><div class="sub">اليوم حسب الساعة</div>${chart}</div>
    ${b.daily.length?`<div class="card"><div class="sub">هالشهر حسب اليوم</div>${b.daily.slice().reverse().map(d=>row(dmy(d.day),`${num(d.kwh,2)} kWh${b.price_per_kwh?' · '+money(d.kwh*b.price_per_kwh):''}`)).join('')}</div>`:''}
    ${b.events.length?`<div class="card"><div class="sub">شو صار</div>${b.events.map(e=>row(esc(e.kind==='fault'?`عطل: ${AC_FAULTS[e.detail]||e.detail}`:AC_EVENTS[e.kind]||e.kind),esc(String(e.at).slice(5,16)))).join('')}</div>`:''}
