@@ -72,10 +72,10 @@ async function shoppingScreen(){
     if(!shared&&confirm('بدك تسجّل اللي دفعته كمصروف؟')){expenseForm();setTimeout(()=>{$('#fName').value='سوبرماركت';$('#fName').dispatchEvent(new Event('change'));$('#fAmount').focus()},50)}});
 }
 
-// ---------- gas cylinders: the computer's numbers, updated at once with swaps not uploaded yet ----------
+// ---------- gas cylinders: the numbers from Drive, updated at once with swaps not saved yet ----------
 async function gasState(){
   const base=CAT?.gas?.cylinders||[{cylinder:'المطبخ',last:null,avg:null,swaps:0}],day=s=>new Date(s+'T00:00:00');
-  const mine=(await allEntries()).filter(e=>e.type==='gas'&&CAT?.inbox?.[e.id]!=='applied').map(e=>e.data);
+  const mine=(await allEntries()).filter(e=>e.type==='gas'&&!e.uploaded_at).map(e=>e.data);
   const list=base.map(x=>({...x}));
   for(const s of mine){let x=list.find(c=>c.cylinder===s.cylinder);if(!x){x={cylinder:s.cylinder,last:null,avg:null,swaps:0};list.push(x)}
     if(!x.last||s.swapped_on>x.last)x.last=s.swapped_on}
@@ -91,7 +91,7 @@ async function gasScreen(){
     <div class="row"><div class="field"><label>الجرة</label><input id="gName" list="gNames" value="${esc(list[0]?.cylinder||'المطبخ')}"><datalist id="gNames">${list.map(x=>`<option value="${esc(x.cylinder)}">`).join('')}</datalist></div>
     <div class="field"><label>التاريخ</label><input id="gDate" type="date" value="${today()}"></div></div>
     <div class="field"><label>السعر (اختياري)</label><input id="gPrice" type="number" inputmode="decimal" step="0.001"></div>
-    <p class="hint">إذا كتبت السعر، بينسجّل كمصروف "غاز" وبيستنى موافقتك عالكمبيوتر.</p>
+    <p class="hint">إذا كتبت السعر، بينسجّل كمصروف "غاز" بأول شهر مفتوح.</p>
     <button class="btn" id="gSave">🔥 سجّل التبديل</button></div>`);
   $('#closeSheet').onclick=closeSheet;
   $('#gSave').onclick=async()=>{const cyl=val('gName')||'المطبخ',day=val('gDate'),price=numv('gPrice');if(!day)return toast('اختار التاريخ',true);
