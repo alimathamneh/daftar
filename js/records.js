@@ -201,7 +201,7 @@ function meterDetail(kind,id){
 }
 
 // ---------- the living-room AC's breaker, as the computer recorded it (read only here) ----------
-const AC_EVENTS={on:'اشتغل',off:'انطفى',fault:'عطل',voltage:'الفولت برّا الطبيعي',offline:'انقطع الاتصال',online:'رجع الاتصال'};
+const AC_EVENTS={on:'اشتغل',off:'انطفى',fault:'عطل',voltage:'الفولت برّا الطبيعي',offline:'انقطع الاتصال',online:'رجع الاتصال',gap:'استهلاك ناقص'};
 const AC_FAULTS={ov_cr:'تيار زايد',ov_vol:'فولت عالي',ov_pwr:'حمل زايد',ls_cr:'تيار قليل',ls_vol:'فولت واطي',ls_pow:'حمل قليل'};
 function acScreen(){
   const b=CAT?.breaker;if(!b)return toast('ما في بيانات للمكيف لسا',true);
@@ -211,13 +211,14 @@ function acScreen(){
   openSheet(`${head('❄️ مكيف الصالون')}
    <div class="card">${L?`${row('الحالة',L.online===false?'<span class="st no">مش متصل</span>':L.on?'<span class="st done">شغّال</span>':'<span class="st wait">مطفي</span>')}
      ${row('القدرة',`${num(L.power,1)} W`)}${row('الفولت',`${num(L.voltage,1)} V`)}${(L.faults||[]).length?row('<span style="color:var(--red)">عطل</span>',esc(L.faults.map(f=>AC_FAULTS[f]||f).join('، '))):''}
-     <p class="hint" style="margin:6px 0 0">آخر قراءة من الكمبيوتر: <span dir="ltr">${esc(String(L.at||'').slice(0,16))}</span></p>`:'<p class="hint">ما في قراءة لسا.</p>'}</div>
+     <p class="hint" style="margin:6px 0 0">آخر قراءة من الكمبيوتر: <span dir="ltr">${esc(String(L.at||'').slice(0,16))}</span></p>`:'<p class="hint">ما في قراءة لسا.</p>'}
+     ${b.last_report?`<p class="hint" style="margin:4px 0 0">آخر تقرير استهلاك من Tuya: <span dir="ltr">${esc(b.last_report.slice(0,16))}</span></p>`:''}</div>
    <div class="kpis"><div class="kpi"><small>اليوم</small><b class="num">${num(b.today_kwh,2)} kWh</b><small>${cost(b.today_cost)}</small></div>
     <div class="kpi"><small>هالشهر</small><b class="num">${num(b.month_kwh,2)} kWh</b><small>${cost(b.month_cost)}</small></div></div>
    <div class="card"><div class="sub">اليوم حسب الساعة</div>${chart}</div>
    ${b.daily.length?`<div class="card"><div class="sub">هالشهر حسب اليوم</div>${b.daily.slice().reverse().map(d=>row(dmy(d.day),`${num(d.kwh,2)} kWh${b.price_per_kwh?' · '+money(d.kwh*b.price_per_kwh):''}`)).join('')}</div>`:''}
    ${b.events.length?`<div class="card"><div class="sub">شو صار</div>${b.events.map(e=>row(esc(e.kind==='fault'?`عطل: ${AC_FAULTS[e.detail]||e.detail}`:AC_EVENTS[e.kind]||e.kind),esc(String(e.at).slice(5,16)))).join('')}</div>`:''}
-   <p class="hint" style="text-align:center">${b.price_per_kwh?`التكلفة تقديرية بمعدّل سعر آخر فاتورة (${num(b.price_per_kwh*1000,1)} فلس/kWh). `:''}التشغيل والإطفاء من البرنامج عالكمبيوتر، لأنه القاطع على شبكة البيت.</p>`);
+   <p class="hint" style="text-align:center">${b.price_per_kwh?`التكلفة تقديرية بمعدّل سعر آخر فاتورة (${num(b.price_per_kwh*1000,1)} فلس/kWh). `:''}الاستهلاك من Tuya، والبرنامج عالكمبيوتر بيسحبه كل ما يشتغل. التشغيل والإطفاء من البرنامج عالكمبيوتر، لأنه القاطع على شبكة البيت.</p>`);
   $('#closeSheet').onclick=closeSheet;
 }
 
