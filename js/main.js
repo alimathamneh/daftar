@@ -29,11 +29,8 @@ async function openSettings(){
 }
 
 // ---------- home ----------
-// What the computer did with an entry (sent with the lists): waiting, added, ignored.
-function phoneState(e){if(e.rejected)return '<span class="st no">ما انضاف</span>';if(!e.uploaded_at)return '<span class="st wait">بالآيفون</span>';if(e.direct==='applied')return '<span class="st done">انضاف ✓</span>';
-  const s=CAT?.inbox?.[e.id];return s==='applied'?'<span class="st done">انضاف ✓</span>':s==='dismissed'?'<span class="st no">متجاهَل</span>':'<span class="st part">بانتظار الكمبيوتر</span>'}
-// Entries deleted on the computer leave the phone too.
-async function dropDeleted(){const ib=CAT?.inbox||{};for(const e of await allEntries())if(e.uploaded_at&&ib[e.id]==='deleted')await delEntry(e.id)}
+// Saved into the program, refused (with the reason), or still only on the phone.
+function phoneState(e){if(e.rejected)return '<span class="st no">ما انضاف</span>';if(!e.uploaded_at)return '<span class="st wait">بالآيفون</span>';return '<span class="st done">انضاف ✓</span>'}
 async function renderHome(){
   const every=(await allEntries()).sort((a,b)=>b.created_at.localeCompare(a.created_at));
   const pending=every.filter(e=>!e.uploaded_at),list=every.filter(e=>e.type!=='shopping');
@@ -55,7 +52,7 @@ async function renderHome(){
     <div class="grow"><b>${esc(title(e))}</b><small>${sub(e)}</small></div>${phoneState(e)}<button class="del" data-del="${e.id}" aria-label="حذف">🗑</button></div>`).join('')
     :'<div class="empty">لسا ما سجّلت شي.</div>';
   $('#list').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{const e=list.find(x=>x.id===b.dataset.del);
-    if(confirm(e?.uploaded_at?'بينشال من قائمة الآيفون بس. اللي انرفع للكمبيوتر بتحذفه من صفحة "من الآيفون" هناك.':'تحذف هالتسجيل؟ لسا ما انرفع، فرح يضيع.')){await delEntry(b.dataset.del);renderHome()}});
+    if(confirm(e?.uploaded_at?'بينشال من هالقائمة بس، وبيضل بالبرنامج. لتحذفه من البرنامج افتحه من "عرض بياناتي" أو "القراءات".':'تحذف هالتسجيل؟ لسا ما انحفظ، فرح يضيع.')){await delEntry(b.dataset.del);renderHome()}});
 }
 function applyTheme(){let t='auto';try{t=localStorage.getItem('hm-theme')||'auto'}catch{}
   const dark=t==='dark'||(t==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';
@@ -73,7 +70,7 @@ addEventListener('online',net);addEventListener('offline',net);
 
 document.querySelectorAll('[data-form]').forEach(b=>b.onclick=()=>{if(!CAT)toast('ما في قوائم لسا. حدّثها من Drive لما يصير عندك نت.',true);
   ({expense:expenseForm,electricity:()=>readingForm('electricity'),water:()=>readingForm('water'),payment:paymentForm})[b.dataset.form]()});
-$('#openView').onclick=viewScreen;$('#openShop').onclick=shoppingScreen;$('#openGas').onclick=gasScreen;$('#uploadBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());$('#syncBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());
+$('#openView').onclick=viewScreen;$('#openMeters').onclick=()=>metersScreen();$('#openDebts').onclick=debtsScreen;$('#openShop').onclick=shoppingScreen;$('#openGas').onclick=gasScreen;$('#uploadBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());$('#syncBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());
 addEventListener('online',()=>autoSync(true));
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')autoSync()});$('#refreshBtn').onclick=e=>withBusy(e.currentTarget,()=>refreshCatalog(),'بحدّث القوائم…');$('#openSettings').onclick=openSettings;
 
