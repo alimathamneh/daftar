@@ -200,6 +200,27 @@ function meterDetail(kind,id){
   $('#mEdit')&&($('#mEdit').onclick=()=>{VIEW.pid=x.period_id;editRecord(kind,x.id,()=>metersScreen(kind))});
 }
 
+// ---------- the living-room AC's breaker, as the computer recorded it (read only here) ----------
+const AC_EVENTS={on:'اشتغل',off:'انطفى',fault:'عطل',voltage:'الفولت برّا الطبيعي',offline:'انقطع الاتصال',online:'رجع الاتصال'};
+const AC_FAULTS={ov_cr:'تيار زايد',ov_vol:'فولت عالي',ov_pwr:'حمل زايد',ls_cr:'تيار قليل',ls_vol:'فولت واطي',ls_pow:'حمل قليل'};
+function acScreen(){
+  const b=CAT?.breaker;if(!b)return toast('ما في بيانات للمكيف لسا',true);
+  const L=b.live,max=Math.max(0.001,...b.hourly.map(h=>h.kwh||0)),cost=v=>v==null?'':`<span dir="ltr">${money(v)}</span>`;
+  const chart=`<div style="display:flex;align-items:flex-end;gap:2px;height:90px;direction:ltr;margin-top:6px">${b.hourly.map(h=>`<div title="${h.hour}:00" style="flex:1;border-radius:3px 3px 0 0;height:${h.kwh==null?2:Math.max(3,h.kwh/max*86)}px;background:${h.kwh==null?'var(--border,#e5e7eb)':'var(--brand,#5b5cf0)'}"></div>`).join('')}</div>
+    <div style="display:flex;justify-content:space-between;direction:ltr;font-size:11px;color:var(--muted)"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>`;
+  openSheet(`${head('❄️ مكيف الصالون')}
+   <div class="card">${L?`${row('الحالة',L.online===false?'<span class="st no">مش متصل</span>':L.on?'<span class="st done">شغّال</span>':'<span class="st wait">مطفي</span>')}
+     ${row('القدرة',`${num(L.power,1)} W`)}${row('الفولت',`${num(L.voltage,1)} V`)}${(L.faults||[]).length?row('<span style="color:var(--red)">عطل</span>',esc(L.faults.map(f=>AC_FAULTS[f]||f).join('، '))):''}
+     <p class="hint" style="margin:6px 0 0">آخر قراءة من الكمبيوتر: <span dir="ltr">${esc(String(L.at||'').slice(0,16))}</span></p>`:'<p class="hint">ما في قراءة لسا.</p>'}</div>
+   <div class="kpis"><div class="kpi"><small>اليوم</small><b class="num">${num(b.today_kwh,2)} kWh</b><small>${cost(b.today_cost)}</small></div>
+    <div class="kpi"><small>هالشهر</small><b class="num">${num(b.month_kwh,2)} kWh</b><small>${cost(b.month_cost)}</small></div></div>
+   <div class="card"><div class="sub">اليوم حسب الساعة</div>${chart}</div>
+   ${b.daily.length?`<div class="card"><div class="sub">هالشهر حسب اليوم</div>${b.daily.slice().reverse().map(d=>row(dmy(d.day),`${num(d.kwh,2)} kWh${b.price_per_kwh?' · '+money(d.kwh*b.price_per_kwh):''}`)).join('')}</div>`:''}
+   ${b.events.length?`<div class="card"><div class="sub">شو صار</div>${b.events.map(e=>row(esc(e.kind==='fault'?`عطل: ${AC_FAULTS[e.detail]||e.detail}`:AC_EVENTS[e.kind]||e.kind),esc(String(e.at).slice(5,16)))).join('')}</div>`:''}
+   <p class="hint" style="text-align:center">${b.price_per_kwh?`التكلفة تقديرية بمعدّل سعر آخر فاتورة (${num(b.price_per_kwh*1000,1)} فلس/kWh). `:''}التشغيل والإطفاء من البرنامج عالكمبيوتر، لأنه القاطع على شبكة البيت.</p>`);
+  $('#closeSheet').onclick=closeSheet;
+}
+
 // ---------- debts and installments: the details and every payment ----------
 const OB_KIND={installment:'قسط',owed_to_me:'إلي عند حدا',i_owe:'علي لحدا'};
 function debtsScreen(){
