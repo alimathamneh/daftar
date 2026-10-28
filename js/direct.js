@@ -233,16 +233,22 @@ function monthReport(s,pid){
 // Read only: the phone can't reach the breaker, which is on the home network.
 function breakerSummary(s){
   if(!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name='breaker_energy'"))return null;
-  const today=nowIso().slice(0,10),month=today.slice(0,7),B="datetime(at,'-15 minutes')";
+  const today=nowIso().slice(0,10),B="datetime(at,'-15 minutes')";
+  // The month starts on the chosen day (breaker.month_start_day / cycle on the computer).
+  let sd=1;for(const k of ['breaker_month_start','month_start_day']){const v=parseInt((s.one('SELECT value FROM settings WHERE key=?',[k])||{}).value,10);if(v>=1&&v<=28){sd=v;break}}
+  const on=(y,m)=>{const t=new Date(y,m-1+0,1);const yy=t.getFullYear(),mm=t.getMonth()+1;return `${yy}-${pad(mm)}-${pad(Math.min(sd,new Date(yy,mm,0).getDate()))}`};
+  const [ty,tm,td]=today.split('-').map(Number),first=td>=sd?on(ty,tm):on(ty,tm-1);
+  const [fy,fm]=first.split('-').map(Number),nextStart=on(fy,fm+1),lastD=new Date(nextStart+'T00:00:00');lastD.setDate(lastD.getDate()-1);
+  const last=`${lastD.getFullYear()}-${pad(lastD.getMonth()+1)}-${pad(lastD.getDate())}`;
   const hours={};for(const x of s.all(`SELECT strftime('%H',${B}) h,SUM(wh) wh FROM breaker_energy WHERE date(${B})=? GROUP BY h`,[today]))hours[x.h]={kwh:x.wh/1000};
-  const days=s.all(`SELECT date(${B}) day,SUM(wh)/1000.0 kwh FROM breaker_energy WHERE strftime('%Y-%m',${B})=? GROUP BY day ORDER BY day`,[month]);
+  const days=s.all(`SELECT date(${B}) day,SUM(wh)/1000.0 kwh FROM breaker_energy WHERE date(${B}) BETWEEN ? AND ? GROUP BY day ORDER BY day`,[first,last]);
   const lastReport=(s.one('SELECT MAX(at) m FROM breaker_energy')||{}).m||null;
   const bill=s.one('SELECT home_amount,home_consumption FROM electricity WHERE home_consumption>0 AND home_amount>0 ORDER BY record_date DESC,id DESC LIMIT 1');
   const price=bill?r(bill.home_amount/bill.home_consumption,4):null;
   let live=null;try{live=JSON.parse((s.one("SELECT value FROM settings WHERE key='breaker_live'")||{}).value||'null')}catch{}
   const todayKwh=r(Object.values(hours).reduce((t,x)=>t+sf(x.kwh),0),3),monthKwh=r(days.reduce((t,x)=>t+sf(x.kwh),0),3);
   if(!live&&!days.length&&!lastReport)return null;
-  return {live,last_report:lastReport,today_kwh:todayKwh,month_kwh:monthKwh,price_per_kwh:price,today_cost:price?r(todayKwh*price,3):null,month_cost:price?r(monthKwh*price,3):null,
+  return {live,last_report:lastReport,month_start_day:sd,month_first:first,month_last:last,today_kwh:todayKwh,month_kwh:monthKwh,price_per_kwh:price,today_cost:price?r(todayKwh*price,3):null,month_cost:price?r(monthKwh*price,3):null,
     hourly:[...Array(24).keys()].map(h=>{const k=pad(h);return {hour:k,kwh:hours[k]?r(sf(hours[k].kwh),3):null}}),
     daily:days.map(x=>({day:x.day,kwh:r(sf(x.kwh),3)})),events:s.all('SELECT at,kind,detail FROM breaker_events ORDER BY id DESC LIMIT 12')}}
 
