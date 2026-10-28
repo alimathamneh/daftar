@@ -1,5 +1,5 @@
 // Phone notebook: the app shell is cached so it opens without internet. Google traffic is never cached.
-const CACHE='home-phone-v28';
+const CACHE='home-phone-v29';
 const SHELL=['./','./index.html','./style.css',...['util','drive','forms','records','shopping','main','direct'].map(n=>`./js/${n}.js`),'./lib/jszip.min.js','./lib/sql-wasm.js','./lib/sql-wasm.wasm','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png',
   './fonts/ibm-plex-sans-arabic-arabic-400-normal.woff2','./fonts/ibm-plex-sans-arabic-arabic-600-normal.woff2',
   './fonts/ibm-plex-sans-arabic-latin-400-normal.woff2','./fonts/ibm-plex-sans-arabic-latin-600-normal.woff2'];
