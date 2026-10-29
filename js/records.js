@@ -237,6 +237,94 @@ function acScreen(){
   $('#closeSheet').onclick=closeSheet;
 }
 
+// ---------- energy: every appliance measured, in kWh (the computer's "Energy" page) ----------
+const EN_NAME={living:'مكيف الصالون',bedroom:'مكيف غرفة النوم',dryer:'النشافة'};
+const EN_COLOR={living:'var(--brand,#5b5cf0)',bedroom:'#0ea5a4',dryer:'#f59e0b'};
+const EN={tab:'daily',device:'all',back:0,sel:null};   // back = how many periods before the current one; sel = the bar tapped
+const enKw=v=>`<span dir="ltr">${num(v||0,2)} kWh</span>`;
+const enDay=s=>new Date(s+'T00:00:00'),enIso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const enDm=s=>{const d=enDay(s);return `${d.getDate()}/${d.getMonth()+1}`};
+// A label with words (a month name) keeps the page's direction, with only its dates left to right.
+const enLabel=s=>/[ء-ي]/.test(s)?esc(s).replace(/\(([^)]*)\)/,(m,x)=>`(<bdi dir="ltr">${x}</bdi>)`):`<bdi dir="ltr">${esc(s)}</bdi>`;
+const enDot=k=>`<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${EN_COLOR[k]}"></span>`;
+// The periods of each tab, newest last: {label, items:[{label, tick, from/to | month}]} (same as static/js/energy.js).
+function enPeriods(d){
+  const months=d.months.filter(m=>m.first<=d.today);
+  if(EN.tab==='hourly')return [{label:'اليوم',hourly:true}];
+  if(EN.tab==='monthly'){
+    // A month that starts late (on the 26th) is named after the calendar month most of its days are in.
+    const name=(m,opt)=>enDay(d.month_start_day>15?m.last:m.first).toLocaleDateString('ar-u-nu-latn',opt);
+    return [{label:`${name(months[0],{month:'short',year:'numeric'})} – ${name(months[months.length-1],{month:'short',year:'numeric'})}`,
+      items:months.map(m=>({label:`${name(m,{month:'long',year:'numeric'})} (${enDm(m.first)} – ${enDm(m.last)})`,tick:name(m,{month:'short'}).slice(0,3),month:m}))}];
+  }
+  if(EN.tab==='weekly'){   // 12 weeks a page, weeks from Sunday
+    const end=enDay(d.today);end.setDate(end.getDate()-end.getDay());const out=[];
+    for(let p=0;p<4;p++){const items=[];for(let i=11;i>=0;i--){const a=new Date(end);a.setDate(a.getDate()-7*(i+12*p));const b=new Date(a);b.setDate(b.getDate()+6);
+      items.push({label:`${enDm(enIso(a))} – ${enDm(enIso(b))}`,tick:i%3===0?enDm(enIso(a)):'',from:enIso(a),to:enIso(b)})}
+      out.unshift({label:`${items[0].label.split(' – ')[0]} – ${items[11].label.split(' – ')[1]}`,items})}
+    return out;
+  }
+  return months.map(m=>{const items=[];for(let x=enDay(m.first);enIso(x)<=m.last;x.setDate(x.getDate()+1))items.push({label:enDm(enIso(x)),from:enIso(x),to:enIso(x),future:enIso(x)>d.today});
+    items.forEach((it,i)=>it.tick=i===0||i===items.length-1||i%7===0?it.label:'');return {label:`${enDm(m.first)} – ${enDm(m.last)}`,items}});
+}
+const enTotal=(dict,from,to)=>{let t=0,any=false;for(const [k,v] of Object.entries(dict||{}))if(k>=from&&k<=to){t+=v;any=true}return any?t:null};
+function energyScreen(again=false){
+  const d=CAT?.energy;if(!d||!d.devices.length)return toast('ما في بيانات للطاقة لسا',true);
+  const y=window.scrollY;   // a tap on the history redraws the screen where it was
+  const series=d.devices.filter(x=>EN.device==='all'||x.key===EN.device);
+  const ps=enPeriods(d),idx=Math.max(0,ps.length-1-EN.back),p=ps[idx];
+  const items=p.hourly?[...Array(24).keys()].map(h=>({label:`الساعة ${h}:00`,tick:[0,6,12,18,23].includes(h)?String(h):'',parts:series.map(s=>(d.hourly[s.key]||[])[h]??null)}))
+    :p.items.map(it=>({...it,parts:series.map(s=>it.month?it.month[s.key]??null:enTotal(d.daily[s.key],it.from,it.to))}));
+  const sums=items.map(x=>x.parts.reduce((t,v)=>t+(v||0),0)),tot=sums.reduce((a,b)=>a+b,0),top=Math.max(0.001,...sums);
+  const counted=items.filter(x=>!x.future&&x.parts.some(v=>v!=null)).length,peak=sums.indexOf(Math.max(...sums));
+  const unit={hourly:'بالساعة',daily:'باليوم',weekly:'بالأسبوع',monthly:'بالشهر'}[EN.tab];
+  const sel=EN.sel!=null&&items[EN.sel]?EN.sel:null;
+  const chart=`<div style="display:flex;align-items:flex-end;gap:${items.length>20?1:3}px;height:120px;direction:ltr;margin-top:8px">${items.map((x,i)=>{const op=x.future?.35:sel!=null&&sel!==i?.45:1;
+      return `<button data-bar="${i}" aria-label="${esc(x.label)}" style="flex:1;height:100%;display:flex;flex-direction:column-reverse;padding:0;border:0;background:none;opacity:${op}">${sums[i]
+        ?x.parts.map((v,j)=>v?`<span style="display:block;height:${Math.max(2,v/top*116)}px;background:${EN_COLOR[series[j].key]}"></span>`:'').join('')
+        :'<span style="display:block;height:2px;background:var(--border,#e5e7eb)"></span>'}</button>`}).join('')}</div>
+    <div style="display:flex;direction:ltr;font-size:11px;color:var(--muted)">${items.map(x=>`<span style="flex:1;text-align:center;white-space:nowrap;overflow:visible">${esc(x.tick||'')}</span>`).join('')}</div>`;
+  const picked=sel==null?'<p class="hint" style="margin:6px 0 0">اكبس على أي عمود لتشوف رقمه.</p>'
+    :`<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:var(--soft,#f4f5fb)"><b>${enLabel(items[sel].label)}</b><br>${enKw(sums[sel])}
+      ${series.length>1?`<br><small class="hint">${series.map((s,j)=>`${enDot(s.key)} ${EN_NAME[s.key]} ${items[sel].parts[j]==null?'—':num(items[sel].parts[j],2)}`).join(' · ')}</small>`:''}</div>`;
+  const diff=d.month_kwh-d.same_period_last_month_kwh,most=[...d.devices].sort((a,b)=>b.month_kwh-a.month_kwh)[0],today=d.devices.reduce((t,x)=>t+(x.today_kwh||0),0);
+  const live=x=>{const L=x.live;if(!L)return '';if(x.key==='dryer')return L.state==='run'?`<span class="st part">شغّالة · ${num(L.power,0)} W</span>`:'';
+    // The breaker stays on with the AC on standby (a few watts): only real use counts as running.
+    return L.online!==false&&L.on&&(x.key!=='living'||L.power>=50)?`<span class="st done">شغّال · ${num(L.power,0)} W</span>`:''};
+  const tab=(k,l)=>`<button type="button" class="${EN.tab===k?'on':''}" data-tab="${k}">${l}</button>`;
+  const chip=(k,l)=>`<button type="button" class="${EN.device===k?'on':''}" data-dev="${k}" style="font-size:12.5px;padding:8px 4px">${k!=='all'?enDot(k)+' ':''}${l}</button>`;
+  const short={living:'الصالون',bedroom:'غرفة النوم',dryer:'النشافة'};
+  openSheet(`${head('⚡ الطاقة')}
+   <div class="kpis"><div class="kpi"><small>هالشهر (<bdi dir="ltr">${enDm(d.month_first)} – ${enDm(d.month_last)}</bdi>)</small><b class="num">${enKw(d.month_kwh)}</b>
+      <small>${d.same_period_last_month_kwh||d.month_kwh?`<span style="color:${diff>0?'var(--red)':'var(--green)'}">${diff>0?'▲':'▼'} ${num(Math.abs(diff),2)}</span> ${diff>0?'أكثر':'أقل'} من نفس الأيام بالشهر الماضي`:''}</small></div>
+    <div class="kpi"><small>المتوقع لآخر الشهر</small><b class="num">${d.estimate_kwh==null?'—':enKw(d.estimate_kwh)}</b><small>على نفس المعدّل</small></div>
+    <div class="kpi"><small>الشهر الماضي</small><b class="num">${enKw(d.last_month_kwh)}</b></div>
+    <div class="kpi"><small>اليوم</small><b class="num">${enKw(today)}</b></div></div>
+   <div class="card"><div class="sub">الأجهزة هالشهر</div>${most&&most.month_kwh>0?`<p class="hint" style="margin:0 0 4px">${EN_NAME[most.key]} الأكثر استهلاكاً</p>`:''}
+    ${d.devices.map(x=>{const share=d.month_kwh?x.month_kwh/d.month_kwh*100:0;
+      return `<div style="margin:10px 0"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
+        <span>${enDot(x.key)} <b>${EN_NAME[x.key]}</b> ${live(x)}</span><span>${enKw(x.month_kwh)} <small class="hint" dir="ltr">${num(share,0)}%</small></span></div>
+        <div style="height:8px;border-radius:9px;background:var(--border,#eef0f5);margin-top:6px;overflow:hidden"><div style="height:100%;width:${share}%;background:${EN_COLOR[x.key]}"></div></div>
+        <small class="hint">الشهر الماضي ${num(x.last_month_kwh,2)} · اليوم ${num(x.today_kwh,2)} kWh</small></div>`}).join('')}</div>
+   <div class="card"><div class="sub">السجل</div>
+    <div class="seg" style="margin-bottom:6px">${tab('hourly','ساعة')}${tab('daily','يوم')}${tab('weekly','أسبوع')}${tab('monthly','شهر')}</div>
+    <div class="seg">${chip('all','الكل')}${d.devices.map(x=>chip(x.key,short[x.key])).join('')}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:10px 0 4px;direction:ltr">
+     <button class="btn white" id="enOlder" style="width:auto;padding:6px 14px" ${idx===0?'disabled':''} aria-label="أقدم">‹</button>
+     <b dir="rtl">${enLabel(p.label)}</b>
+     <button class="btn white" id="enNewer" style="width:auto;padding:6px 14px" ${EN.back===0?'disabled':''} aria-label="أحدث">›</button></div>
+    ${row('المجموع',`<b>${enKw(tot)}</b>`)}${counted?row(`المعدّل ${unit}`,enKw(tot/counted)):''}${tot>0?row('الأعلى',`${enKw(sums[peak])} <small class="hint">${enLabel(items[peak].label)}</small>`):''}
+    ${chart}${picked}</div>
+   <p class="hint" style="text-align:center">الأيام قبل ما يبلّش البرنامج يقيس الجهاز منقولة من سجل SmartThings. التكلفة بتنحسب بعدين على تعرفة البرنامج.</p>`);
+  if(again)window.scrollTo(0,y);
+  $('#closeSheet').onclick=closeSheet;
+  sheet.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{EN.tab=b.dataset.tab;EN.back=0;EN.sel=null;energyScreen(true)});
+  sheet.querySelectorAll('[data-dev]').forEach(b=>b.onclick=()=>{EN.device=b.dataset.dev;energyScreen(true)});
+  sheet.querySelectorAll('[data-bar]').forEach(b=>b.onclick=()=>{const i=+b.dataset.bar;EN.sel=EN.sel===i?null:i;energyScreen(true)});
+  $('#enOlder').onclick=()=>{EN.back++;EN.sel=null;energyScreen(true)};
+  $('#enNewer').onclick=()=>{EN.back=Math.max(0,EN.back-1);EN.sel=null;energyScreen(true)};
+}
+
 // ---------- debts and installments: the details and every payment ----------
 const OB_KIND={installment:'قسط',owed_to_me:'إلي عند حدا',i_owe:'علي لحدا'};
 function debtsScreen(){
