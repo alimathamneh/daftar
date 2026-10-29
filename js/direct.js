@@ -232,14 +232,15 @@ function monthReport(s,pid){
 // and by day. A report covers about the half hour before it, so it counts in the hour of its middle.
 // Read only: the phone can't reach the breaker, which is on the home network.
 // The ACs' month: it starts on the chosen day (breaker.month_start_day / cycle on the computer).
-function acMonth(s){
-  const today=nowIso().slice(0,10);
-  let sd=1;for(const k of ['breaker_month_start','month_start_day']){const v=parseInt((s.one('SELECT value FROM settings WHERE key=?',[k])||{}).value,10);if(v>=1&&v<=28){sd=v;break}}
-  const on=(y,m)=>{const t=new Date(y,m-1+0,1);const yy=t.getFullYear(),mm=t.getMonth()+1;return `${yy}-${pad(mm)}-${pad(Math.min(sd,new Date(yy,mm,0).getDate()))}`};
-  const [ty,tm,td]=today.split('-').map(Number),first=td>=sd?on(ty,tm):on(ty,tm-1);
-  const [fy,fm]=first.split('-').map(Number),nextStart=on(fy,fm+1),lastD=new Date(nextStart+'T00:00:00');lastD.setDate(lastD.getDate()-1);
-  return {sd,first,last:`${lastD.getFullYear()}-${pad(lastD.getMonth()+1)}-${pad(lastD.getDate())}`};
-}
+const dayIso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const addDays=(day,n)=>{const d=new Date(day+'T00:00:00');d.setDate(d.getDate()+n);return dayIso(d)};
+function monthStartDay(s){for(const k of ['breaker_month_start','month_start_day']){const v=parseInt((s.one('SELECT value FROM settings WHERE key=?',[k])||{}).value,10);if(v>=1&&v<=28)return v}return 1}
+// [first, last] day of the month (starting on day sd) that `day` falls in.
+function cycleOf(day,sd){
+  const on=(y,m)=>{const t=new Date(y,m-1,1);const yy=t.getFullYear(),mm=t.getMonth()+1;return `${yy}-${pad(mm)}-${pad(Math.min(sd,new Date(yy,mm,0).getDate()))}`};
+  const [ty,tm,td]=day.split('-').map(Number),first=td>=sd?on(ty,tm):on(ty,tm-1),[fy,fm]=first.split('-').map(Number);
+  return [first,addDays(on(fy,fm+1),-1)]}
+function acMonth(s){const sd=monthStartDay(s),[first,last]=cycleOf(nowIso().slice(0,10),sd);return {sd,first,last}}
 function breakerSummary(s){
   if(!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name='breaker_energy'"))return null;
   const today=nowIso().slice(0,10),B="datetime(at,'-15 minutes')",{sd,first,last}=acMonth(s);
@@ -272,6 +273,39 @@ function samsungSummary(s){
     today_cost:price?r(todayKwh*price,3):null,month_cost:price?r(monthKwh*price,3):null,
     hourly:[...Array(24).keys()].map(h=>{const k=pad(h);return {hour:k,kwh:k in hours?r(sf(hours[k]),3):null}}),
     daily:days.map(x=>({day:x.day,kwh:r(sf(x.kwh),3)})),events:s.all('SELECT at,kind,detail FROM samsung_events ORDER BY id DESC LIMIT 12')}}
+
+// The energy dashboard (energy.summary): every appliance measured, in kWh. Days before the program measured one come
+// from SmartThings' own history (appliance_daily, counted only for days before it was copied). No money on purpose.
+const EN_MEASURED={living:['breaker_energy',"datetime(at,'-15 minutes')",''],bedroom:['samsung_energy','at',''],dryer:['appliance_energy','at',"AND device='dryer'"]};
+const EN_LIVE={living:'breaker_live',bedroom:'samsung_live',dryer:'dryer_live'};
+function energySummary(s){
+  const has=t=>!!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name=?",[t]);
+  const today=nowIso().slice(0,10),sd=monthStartDay(s),[first,last]=cycleOf(today,sd),[pf,pl]=cycleOf(addDays(first,-1),sd),from=addDays(today,-400);
+  const days={};
+  for(const key of Object.keys(EN_MEASURED)){const d={},[t,at,extra]=EN_MEASURED[key];
+    if(has(t))for(const x of s.all(`SELECT date(${at}) day,SUM(wh) wh FROM ${t} WHERE date(${at})>=? ${extra} GROUP BY day`,[from]))d[x.day]=x.wh/1000;
+    if(has('appliance_daily'))for(const x of s.all('SELECT day,kwh,source FROM appliance_daily WHERE device=? AND day>=?',[key,from])){
+      const copied=String(x.source).startsWith('app:')?String(x.source).slice(4,14):'';if(copied&&x.day<copied)d[x.day]=x.kwh}
+    if(Object.keys(d).length)days[key]=Object.fromEntries(Object.keys(d).sort().map(k=>[k,r(d[k],3)]))}
+  const inside=(a,b,d)=>Object.entries(d).filter(([k])=>a<=k&&k<=b),span=(a,b,d)=>r(inside(a,b,d).reduce((t,[,v])=>t+v,0),3);
+  const known=(a,b,d)=>inside(a,b,d).length?span(a,b,d):null;   // a month with nothing measured is "no data", not zero
+  const diff=(a,b)=>Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/864e5);
+  const elapsed=diff(first,today)+1,sameEnd=[addDays(pf,elapsed-1),pl].sort()[0];
+  const live=k=>{try{return JSON.parse((s.one('SELECT value FROM settings WHERE key=?',[EN_LIVE[k]])||{}).value||'null')}catch{return null}};
+  const devices=[];
+  for(const key of Object.keys(EN_MEASURED)){const d=days[key]||{};if(!Object.keys(d).length&&key==='dryer')continue;
+    devices.push({key,live:live(key),first_day:Object.keys(d)[0]||null,month_kwh:span(first,today,d),same_period_last_month_kwh:span(pf,sameEnd,d),
+      last_month_kwh:span(pf,pl,d),today_kwh:d[today]??0})}
+  const month=r(devices.reduce((t,x)=>t+x.month_kwh,0),3),months=[];
+  for(let m=first,i=0;i<13;i++){const [a,b]=cycleOf(m,sd);months.push({first:a,last:b,...Object.fromEntries(devices.map(x=>[x.key,known(a,b,days[x.key]||{})]))});m=addDays(a,-1)}
+  const hourly={};
+  for(const x of devices){const [t,at,extra]=EN_MEASURED[x.key];if(!has(t))continue;
+    const h={};for(const y of s.all(`SELECT strftime('%H',${at}) h,SUM(wh) wh FROM ${t} WHERE date(${at})=? ${extra} GROUP BY h`,[today]))h[y.h]=y.wh/1000;
+    if(Object.keys(h).length)hourly[x.key]=[...Array(24).keys()].map(i=>pad(i) in h?r(h[pad(i)],3):null)}
+  if(!devices.some(x=>x.first_day||x.live))return null;
+  return {today,month_start_day:sd,month_first:first,month_last:last,devices,month_kwh:month,
+    same_period_last_month_kwh:r(devices.reduce((t,x)=>t+x.same_period_last_month_kwh,0),3),last_month_kwh:r(devices.reduce((t,x)=>t+x.last_month_kwh,0),3),
+    estimate_kwh:elapsed?r(month/elapsed*(diff(first,last)+1),3):null,daily:Object.fromEntries(devices.map(x=>[x.key,days[x.key]||{}])),hourly,months:months.reverse()}}
 
 // Each gas cylinder: last swap, days since, average days it lasts (phone_inbox.gas on the computer).
 function gasState(s){
@@ -319,7 +353,7 @@ async function catalogFrom(s,old){
   for(const x of [...meters.electricity,...meters.water]){delete x.tariff_snapshot;x.closed=!!periods.find(p=>p.id===x.period_id&&p.status==='closed')}
   const items=s.all('SELECT * FROM shopping_items WHERE deleted=0 ORDER BY in_cart,updated_at DESC');
   const reports={};for(const p of periods)if(p.status==='closed')reports[String(p.id)]=monthReport(s,p.id);
-  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,names,categories,avg_use,gas:gasState(s),reports,breaker:breakerSummary(s),samsung:samsungSummary(s),
+  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,names,categories,avg_use,gas:gasState(s),reports,breaker:breakerSummary(s),samsung:samsungSummary(s),energy:energySummary(s),
     shopping:{items:items.filter(x=>!x.staple),staples:items.filter(x=>x.staple),names:s.all('SELECT DISTINCT name FROM shopping_items ORDER BY name').map(x=>x.name)},
     last_electricity:s.one('SELECT record_date,main_current,roof_current,car_current FROM electricity ORDER BY record_date DESC,id DESC LIMIT 1')||{},
     last_water:s.one('SELECT record_date,roof_current,total_consumption FROM water ORDER BY record_date DESC,id DESC LIMIT 1')||{},
