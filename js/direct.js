@@ -345,29 +345,47 @@ async function openCopy(tok,headId,key){
   let plain;try{plain=await decryptBytes(key.raw,blob)}catch{throw Object.assign(new Error('كلمة التشفير غلط، جرّب مرة ثانية'),{badKey:true})}
   const SQL=await libs(),zip=await JSZip.loadAsync(plain);
   return {head,zip,db:new SQL.Database(await zip.file('database/home_system.db').async('uint8array'))}}
+// The ACs as the TV box sees them now (server/hub.py DriveLive, devices-live.enc beside the copy): rows the copy
+// doesn't have yet while the computer is off, and the live state. Merged for showing only, after the copy is saved.
+const LIVE_FILE='devices-live.enc';
+const LIVE_TABLES={breaker_energy:['at','wh'],samsung_energy:['at','upto','wh','meter'],appliance_energy:['device','at','upto','wh','meter']};
+async function devicesLive(tok,root,key){
+  try{const f=(await driveFiles(tok,`name = '${LIVE_FILE}' and '${root}' in parents and trashed = false`))[0];if(!f)return null;
+    const data=new Uint8Array(await (await gapi(tok,`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`)).arrayBuffer());
+    return JSON.parse(new TextDecoder().decode(await decryptBytes(key.raw,data)))}catch{return null}}
+function mergeDevices(s,live){
+  if(!live||!live.rows)return;
+  const has=t=>!!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name=?",[t]);
+  for(const [t,cols] of Object.entries(LIVE_TABLES))if(has(t))
+    for(const r of live.rows[t]||[])s.run(`INSERT OR IGNORE INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,r);
+  for(const t of ['breaker_events','samsung_events'])if(has(t))   // the computer numbers its own copies of these
+    for(const [at,kind,detail] of live.rows[t]||[])s.run(`INSERT INTO ${t}(at,kind,detail) SELECT ?,?,? WHERE NOT EXISTS(SELECT 1 FROM ${t} WHERE at=? AND kind=? AND detail=?)`,[at,kind,detail,at,kind,detail]);
+  const at=v=>{try{return JSON.parse(v).at||(JSON.parse(v).pulled_at)||''}catch{return ''}};
+  for(const [k,v] of Object.entries(live.live||{})){const cur=s.one('SELECT value FROM settings WHERE key=?',[k]);
+    if(!cur||at(v)>=at(cur.value))s.run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',[k,v])}}
 // Nothing is automatic any more (same as the computer's start-up): every line is an ordinary expense.
 const unlockAll=db=>{db.run('UPDATE expenses SET auto_calculated=0 WHERE auto_calculated=1');db.run('UPDATE expense_template_items SET auto_calculated=0 WHERE auto_calculated=1')};
 // The lists straight from the Drive copy. The computer uploads its changes a few seconds after making them.
 async function lists(tok,key,old){
-  const {headId}=await locate(tok);
-  const {db}=await openCopy(tok,headId,key);
-  try{return await catalogFrom(new Store(db),old)}finally{db.close()}}
+  const {root,headId}=await locate(tok);
+  const [{db},live]=await Promise.all([openCopy(tok,headId,key),devicesLive(tok,root,key)]);
+  try{const s=new Store(db);mergeDevices(s,live);return await catalogFrom(s,old)}finally{db.close()}}
 // Apply `entries` straight into the Drive copy. Returns {applied:[ids], failed:{id:reason}, catalog}.
 // If the computer saved a copy at the same moment, start again once from its copy.
 async function run(tok,entries,key){
   try{return await runOnce(tok,entries,key)}
   catch(err){if(!err.moved)throw err;return runOnce(tok,entries,key)}}
 async function runOnce(tok,entries,key){
-  const {folder,headId}=await locate(tok);
-  const {head,zip,db}=await openCopy(tok,headId,key),s=new Store(db);
+  const {root,folder,headId}=await locate(tok);
+  const {head,zip,db}=await openCopy(tok,headId,key),s=new Store(db),liveP=devicesLive(tok,root,key);
   const actor=(s.one("SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1")||{}).id||null,home=new Home(s,zip,actor);
   db.create_function('home_event_id',()=>home.event);db.create_function('home_actor_id',()=>actor);unlockAll(db);
   const applied=[],failed={};
   for(const e of entries){db.run('SAVEPOINT one');try{await home.apply(e);db.run('RELEASE one');applied.push(e.id)}catch(err){db.run('ROLLBACK TO one');db.run('RELEASE one');failed[e.id]=err.message}}
   if(!applied.length){db.close();return {applied,failed,catalog:null}}
   if(db.exec('PRAGMA integrity_check')[0].values[0][0]!=='ok')throw new Error('فحص قاعدة البيانات فشل، ما رفعت شي');
-  const catalog=await catalogFrom(s,CAT);
-  zip.file('database/home_system.db',db.export(),{createFolders:false});db.close();
+  zip.file('database/home_system.db',db.export(),{createFolders:false});
+  mergeDevices(s,await liveP);const catalog=await catalogFrom(s,CAT);db.close();
   const rev=crypto.randomUUID().replace(/-/g,''),manifest=JSON.parse(await zip.file('manifest.json').async('string'));
   zip.file('manifest.json',JSON.stringify({...manifest,format:3,revision:rev,parent_revision:head.revision,device_id:'iphone',created_at:new Date().toISOString()}));
   // The computer accepts only files in the archive (drive_sync.validate_snapshot): no folder entries.
