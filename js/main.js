@@ -47,6 +47,8 @@ async function renderHome(){
   $('#catInfo').textContent=CAT?`القوائم من ${dmy(CAT.generated_at)}`:'لسا ما في قوائم — حدّثها من Drive';
   const acs=[CAT?.breaker,CAT?.samsung].filter(Boolean);
   if($('#openAC')){$('#openAC').classList.toggle('hidden',!acs.length);if(acs.length)$('#acInfo').textContent=`اليوم ${num(acs.reduce((t,a)=>t+(a.today_kwh||0),0),2)} kWh`}
+  const en=CAT?.energy;
+  if($('#openEnergy')){$('#openEnergy').classList.toggle('hidden',!en?.devices?.length);if(en?.devices?.length)$('#energyInfo').textContent=`هالشهر ${num(en.month_kwh,1)} kWh`}
   const title=e=>{const d=e.data||{};if(e.type==='edit'||e.type==='delete')return `${TYPES[e.type].name}: ${d.label||''}`;if(e.type==='expense')return `${d.mode==='pay'?'دفعة: ':''}${d.name||'مصروف'}`;if(e.type==='payment')return d.obligation_name||'دفعة قسط';return TYPES[e.type].name};
   const sub=e=>{const d=e.data||{};if(e.rejected)return `<span style="color:var(--red)">${esc(e.rejected)}</span>`;if(e.type==='gas')return esc(`${d.cylinder} · ${dmy(d.swapped_on)}`);if(e.type==='edit')return esc(Object.keys(d.changes||{}).length+' حقول تغيّرت');if(e.type==='delete')return esc(KIND_AR[d.kind]||'');const amt=d.amount?money(d.amount):e.type==='electricity'?`رئيسي ${d.main_current??'—'}`:`روف ${d.roof_current??'—'}`;
     const ph=(e.photos?.length||e.photo_count)?` · 📷 ${e.photos?.length||e.photo_count}`:'';return `<span class="num">${esc(amt)}</span>${e.period_label?' · '+esc(e.period_label):''}${ph}`};
@@ -74,7 +76,7 @@ document.querySelectorAll('[data-form]').forEach(b=>b.onclick=()=>{if(!CAT)toast
   ({expense:expenseForm,electricity:()=>readingForm('electricity'),water:()=>readingForm('water'),payment:paymentForm})[b.dataset.form]()});
 $('#openView').onclick=viewScreen;
 // Guarded: right after an update the phone can briefly have the new code with the old page.
-$('#openMeters')&&($('#openMeters').onclick=()=>metersScreen());$('#openDebts')&&($('#openDebts').onclick=debtsScreen);$('#openAC')&&($('#openAC').onclick=acScreen);$('#openShop').onclick=shoppingScreen;$('#openGas').onclick=gasScreen;$('#uploadBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());$('#syncBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());
+$('#openMeters')&&($('#openMeters').onclick=()=>metersScreen());$('#openDebts')&&($('#openDebts').onclick=debtsScreen);$('#openAC')&&($('#openAC').onclick=acScreen);$('#openEnergy')&&($('#openEnergy').onclick=()=>energyScreen());$('#openShop').onclick=shoppingScreen;$('#openGas').onclick=gasScreen;$('#uploadBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());$('#syncBtn').onclick=e=>withBusy(e.currentTarget,()=>upload());
 addEventListener('online',()=>autoSync(true));
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')autoSync()});$('#refreshBtn').onclick=e=>withBusy(e.currentTarget,()=>refreshCatalog(),'بحدّث القوائم…');$('#openSettings').onclick=openSettings;
 
