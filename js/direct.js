@@ -177,7 +177,9 @@ class Home{
       if(e.type==='edit'||e.type==='delete'){const now=this.current(d.kind,d.id);if(!now)throw new Error('البند ما عاد موجود');
         if(await version(d.kind,now)!==d.v)throw new Error('تغيّر عالكمبيوتر بعد ما الآيفون شافه');const ch=d.changes||{};
         if(e.type==='delete'){({expense:()=>this.deleteExpense(d.id),electricity:()=>this.deleteReading('electricity',d.id),water:()=>this.deleteReading('water',d.id),payment:()=>this.deletePayment(d.id)}[d.kind]||(()=>{throw new Error('ما بينحذف من الآيفون')}))();return}
-        ({expense:()=>this.updateExpense(d.id,{...ch}),electricity:()=>this.updateReading('electricity',d.id,ch),water:()=>this.updateReading('water',d.id,ch),payment:()=>this.updatePayment(d.id,ch),period:()=>this.updatePeriod(d.id,ch)}[d.kind])();return}
+        // An edit of a reading may only add photos (no field changed); they join the reading like the add form's.
+        if(Object.keys(ch).length)({expense:()=>this.updateExpense(d.id,{...ch}),electricity:()=>this.updateReading('electricity',d.id,ch),water:()=>this.updateReading('water',d.id,ch),payment:()=>this.updatePayment(d.id,ch),period:()=>this.updatePeriod(d.id,ch)}[d.kind])();
+        if(d.kind==='electricity'||d.kind==='water')await this.attach(e.photos,{period_id:this.current(d.kind,d.id).period_id,[d.kind+'_id']:d.id,category:'Meter Photo'});return}
       if(e.type==='gas'){this.s.run('INSERT OR IGNORE INTO gas_swaps(id,cylinder,swapped_on,price,by,created_at) VALUES(?,?,?,?,?,?)',[d.id,(d.cylinder||'المطبخ').slice(0,40),isoDay(d.swapped_on,'التاريخ'),d.price??null,d.by||'',new Date().toISOString()]);return}
       if(e.type==='shopping'){for(const op of Object.values(d.ops||{})){const old=this.s.one('SELECT updated_at FROM shopping_items WHERE id=?',[op.id]);if(old&&old.updated_at>=op.updated_at)continue;
           if(old)this.s.run(`UPDATE shopping_items SET name=COALESCE(NULLIF(?,''),name),qty=?,in_cart=?,staple=?,deleted=?,updated_at=? WHERE id=?`,[op.name||'',op.qty||'',op.in_cart?1:0,op.staple?1:0,op.deleted?1:0,op.updated_at,op.id]);
