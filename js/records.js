@@ -125,6 +125,9 @@ function findRecord(kind,id){const pid=String(VIEW.pid),eq=x=>String(x.id)===Str
 async function editRecord(kind,id,backTo){
   const rec=findRecord(kind,id);if(!rec)return toast('ما لقيت البند',true);
   const ch=await pendingChanges(),old=ch[kind+':'+id],cur=withChange(rec,old),auto=kind==='expense'&&rec.auto_calculated;
+  // Readings take more photos when edited (meter or bill); an edit not uploaded yet keeps its photos in the new one.
+  const pics=kind==='electricity'||kind==='water',kept=pics&&old?.type==='edit'?old.photos||[]:[];
+  PHOTOS.forEach(p=>URL.revokeObjectURL(p.url));PHOTOS=[];
   const label=kind==='expense'?rec.name:kind==='period'?`شهر ${monthLabel(rec.period_date)}`:kind==='payment'?`${rec._ob?.name||'دفعة'} · ${dmy(rec.paid_on)}`:`${KIND_AR[kind]} · ${dmy(rec.record_date)}`;
   const input=([k,l,t])=>{const v=cur[k]??'',dis=auto&&['name','actual','category'].includes(k)?'disabled':'';
     if(t==='section')return `<div class="field"><label>${l}</label><select id="e_${k}">${Object.entries(SECTIONS_AR).map(([a,b])=>`<option value="${a}" ${(v||'auto')===a?'selected':''}>${b}</option>`).join('')}</select></div>`;
@@ -134,19 +137,23 @@ async function editRecord(kind,id,backTo){
    ${auto?'<p class="warn">هالمصروف محسوب تلقائياً من الفواتير، فالاسم والمبلغ ما بيتعدّلوا.</p>':''}
    ${old?`<p class="warn">${old.type==='delete'?'في طلب حذف لهالبند لسا ما انرفع.':'في تعديل لهالبند لسا ما انرفع، رح ينستبدل بهاد.'}</p>`:''}
    ${FORMS[kind].map(input).join('')}
+   ${pics?photoBlock('أضف صور للعداد أو الفاتورة (اختياري)'):''}
+   ${kept.length?`<p class="hint">في ${kept.length} ${kept.length===1?'صورة':'صور'} بالتعديل اللي لسا ما انرفع، بتنضاف مع هاد.</p>`:''}
    <button class="btn" id="eSave">احفظ التعديل</button>
    ${kind!=='period'&&!auto?'<button class="btn danger" id="eDel" style="margin-top:10px">احذف</button>':''}
    ${old?'<button class="btn white" id="eUndo" style="margin-top:10px">ألغِ الطلب اللي لسا ما انرفع</button>':''}</div>`);
-  $('#closeSheet').onclick=closeSheet;
+  $('#closeSheet').onclick=closeSheet;if(pics)bindPhotos();
   const back=typeof backTo==='function'?backTo:()=>{kind==='payment'?paymentsScreen(rec._ob.id):viewScreen()};
   const queue=async(type,data)=>{if(old)await delEntry(old.id);
+    const photos=type==='edit'?[...kept,...PHOTOS.map(p=>({blob:p.blob,name:p.name}))]:[];
     await putEntry({id:crypto.randomUUID(),type,created_at:new Date().toISOString(),period_id:kind==='payment'?null:Number(kind==='period'?rec.id:VIEW.pid),period_label:periodLabel(VIEW.pid),
-      data:{kind,id:Number(id),v:rec.v,label,...data},photos:[]});toast(type==='delete'?'انحفظ طلب الحذف ✓':'انحفظ التعديل ✓');back();syncNow()};
+      data:{kind,id:Number(id),v:rec.v,label,...data},photos});PHOTOS.forEach(p=>URL.revokeObjectURL(p.url));PHOTOS=[];
+    toast(type==='delete'?'انحفظ طلب الحذف ✓':'انحفظ التعديل ✓');back();syncNow()};
   $('#eSave').onclick=()=>{const changes={};
     for(const [k,,t] of FORMS[kind]){const el=$('#e_'+k);if(!el||el.disabled)continue;let v=el.value.trim();if(t==='num')v=v===''?null:Number(v);if(t==='date'&&v==='')v=null;
       const before=t==='section'?(rec[k]||'auto'):rec[k]??null,same=t==='num'?(before===null?v===null:v!==null&&Math.abs(Number(before)-v)<0.0005):String(before??'').slice(0,t==='date'?10:undefined)===String(v??'');
       if(!same)changes[k]=v}
-    if(!Object.keys(changes).length)return old?toast('ما في تغيير جديد'):toast('ما غيّرت شي');
+    if(!Object.keys(changes).length&&!PHOTOS.length)return old?toast('ما في تغيير جديد'):toast('ما غيّرت شي');   // photos alone are an edit
     // The same rule as the program: paid can't be more than actual (an empty actual takes the budget when Paid).
     if(kind==='expense'){const after={...rec,...changes};let actual=Number(after.actual||0);const paid=Number(after.paid_amount||0);
       if(after.status==='Paid'&&actual<=0&&!rec.auto_calculated)actual=Number(after.budget||0);
