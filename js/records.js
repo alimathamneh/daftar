@@ -62,23 +62,35 @@ function roofLines(pid){
       ['قيمة الاستهلاك',`${f(Number(e.roof_amount)-fee)} JOD`],['نص الرسوم',`${f(fee)} JOD`],['مجموع الكهرباء',`${f(e.roof_amount)} JOD`])}
   if(w)L.push(['💧 المياه',''],['العداد',`من ${w.roof_prev??'—'} إلى ${w.roof_current??'—'}`],['الاستهلاك',`${f(w.roof_consumption).replace(/\.000$/,'')} م³`],['مجموع المياه',`${f(w.roof_amount)} JOD`]);
   const total=Number(e?.roof_amount||0)+Number(w?.roof_amount||0);
-  return {month:monthLabel(p?.period_date),lines:L,total:`${f(total)} JOD`};
+  // The saved photos of the two readings (kept on the phone for recent months: Direct keepPhotos).
+  const photos=[...(e?.photos||[]).map(x=>({...x,kind:'⚡'})),...(w?.photos||[]).map(x=>({...x,kind:'💧'}))];
+  return {month:monthLabel(p?.period_date),lines:L,total:`${f(total)} JOD`,photos};
 }
-function roofScreen(pid){
+async function roofScreen(pid){
   const s=roofLines(pid);let photo=null;
+  // Each saved photo with its file on the phone (or none: an older month, or the lists not refreshed since).
+  const saved=[];for(const x of s.photos){let blob=null;try{blob=await photoGet(x.stored)}catch{}saved.push({...x,blob,url:blob?URL.createObjectURL(blob):'',on:!!blob})}
+  const missing=saved.filter(x=>!x.blob).length;
   openSheet(`${head('كشف الروف')}<div class="card"><h2>شهر ${esc(s.month)}</h2>
    ${s.lines.map(([a,b])=>b===''?`<div class="sub" style="margin-top:8px">${a}</div>`:`<div class="line"><span class="grow"><span>${esc(a)}</span></span><b dir="auto">${esc(b)}</b></div>`).join('')}
    <div class="line" style="font-size:16px"><span class="grow"><span><b>المطلوب من الروف</b></span></span><b class="num">${esc(s.total)}</b></div></div>
    <p class="hint">الكشف فيه أرقام الروف بس، بدون أي شي من مصاريفك أو دخلك.</p>
-   <label class="pick" style="min-height:52px">📷 أضف صورة العداد (اختياري)<input type="file" accept="image/*" id="roofPhoto"></label><div class="photos" id="roofPh"></div>
+   ${saved.length?`<div class="card"><div class="sub">الصور المحفوظة (بتنبعت مع الكشف)</div><div class="photos">${saved.filter(x=>x.blob).map((x,i)=>`<span class="ph pickable on" data-i="${saved.indexOf(x)}"><img src="${x.url}" alt="" data-zoom-saved="${saved.indexOf(x)}"><button type="button" data-tick="${saved.indexOf(x)}" aria-label="اختيار">✓</button><small>${x.kind}</small></span>`).join('')}</div>
+     ${missing?`<p class="hint">${missing===1?'صورة وحدة مش محفوظة':`${missing} صور مش محفوظين`} على التلفون. التلفون بيحفظ صور آخر 3 شهور لما يحدّث القوائم وفي نت.</p>`:''}
+     <p class="hint">اكبس ✓ عشان تشيل صورة أو ترجعها، واكبس على الصورة عشان تكبر.</p></div>`:''}
+   <label class="pick" style="min-height:52px">📷 أضف صورة ثانية (اختياري)<input type="file" accept="image/*" id="roofPhoto"></label><div class="photos" id="roofPh"></div>
    <button class="btn" id="shareImg">مشاركة كصورة</button><button class="btn white" id="shareTxt" style="margin-top:10px">مشاركة كنص</button>`);
-  $('#closeSheet').onclick=closeSheet;
+  $('#closeSheet').onclick=()=>{saved.forEach(x=>x.url&&URL.revokeObjectURL(x.url));closeSheet()};
+  sheet.querySelectorAll('[data-zoom-saved]').forEach(im=>im.onclick=()=>zoom(saved[+im.dataset.zoomSaved].url));
+  sheet.querySelectorAll('[data-tick]').forEach(b=>b.onclick=()=>{const x=saved[+b.dataset.tick];x.on=!x.on;b.closest('.ph').classList.toggle('on',x.on)});
   $('#roofPhoto').onchange=async ev=>{const f=ev.target.files[0];if(!f)return;photo=await shrink(f);$('#roofPh').innerHTML=`<img src="${URL.createObjectURL(photo)}" alt="">`};
   const text=()=>`كشف الروف — شهر ${s.month}\n`+s.lines.map(([a,b])=>b===''?`\n${a}`:`${a}: ${b}`).join('\n')+`\n\nالمطلوب من الروف: ${s.total}`;
   const share=async data=>{try{if(navigator.canShare&&!navigator.canShare(data))throw new Error('x');await navigator.share(data)}
     catch(e){if(e.name==='AbortError')return;try{await navigator.clipboard.writeText(text());toast('انتسخ الكشف، الصقه وين ما بدك')}catch{toast('المشاركة مش مدعومة هون',true)}}};
   $('#shareTxt').onclick=()=>share({title:'كشف الروف',text:text()});
   $('#shareImg').onclick=async()=>{const files=[new File([await roofImage(s)],`roof-${s.month.replace('/','-')}.png`,{type:'image/png'})];
+    const n={};for(const x of saved.filter(x=>x.on&&x.blob)){const t=x.kind==='⚡'?'electricity':'water',png=/\.png$/i.test(x.stored);n[t]=(n[t]||0)+1;
+      files.push(new File([x.blob],`${t}-${n[t]}${png?'.png':'.jpg'}`,{type:x.blob.type||(png?'image/png':'image/jpeg')}))}
     if(photo)files.push(new File([photo],'meter.jpg',{type:'image/jpeg'}));share({title:'كشف الروف',files})};
 }
 async function roofImage(s){
