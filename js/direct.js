@@ -330,6 +330,9 @@ async function catalogFrom(s,old){
     expenses[k]=await withV('expense',s.all('SELECT id,name,category,section,budget,actual,paid_amount,status,payment_date,notes,0 AS auto_calculated FROM expenses WHERE period_id=? ORDER BY sort_order,id',[p.id]));
     readings[k]={electricity:await withV('electricity',s.all(`SELECT id,${EDITABLE.electricity.join(',')},status,apartment_amount,home_amount,car_amount,roof_amount,roof_consumption,roof_prev FROM electricity WHERE period_id=? ORDER BY record_date DESC,id DESC`,[p.id])),
       water:await withV('water',s.all(`SELECT id,${EDITABLE.water.join(',')},status,apartment_amount,roof_amount,roof_consumption,roof_prev FROM water WHERE period_id=? ORDER BY record_date DESC,id DESC`,[p.id]))};
+    // Each reading's photos (meter or bill), newest first; their files are kept on the phone by keepPhotos.
+    for(const t of ['electricity','water'])for(const x of readings[k][t])
+      x.photos=s.all(`SELECT stored_name stored,file_name name FROM attachments WHERE ${t}_id=? AND mime_type LIKE 'image/%' ORDER BY uploaded_at DESC,id DESC`,[x.id]);
     const actual=expenses[k].reduce((t,e)=>t+sf(e.actual),0),paid=expenses[k].reduce((t,e)=>t+Math.min(sf(e.paid_amount),sf(e.actual)),0);
     const util=(t,cols)=>s.one(`SELECT ${cols} FROM ${t} WHERE period_id=? ORDER BY record_date DESC,id DESC LIMIT 1`,[p.id]);
     summary[k]={salary:sf(p.salary),actual:r(actual,3),paid:r(paid,3),unpaid:r(actual-paid,3),remaining:r(sf(p.salary)-actual,3),
@@ -399,13 +402,25 @@ function mergeDevices(s,live){
   const at=v=>{try{return JSON.parse(v).at||(JSON.parse(v).pulled_at)||''}catch{return ''}};
   for(const [k,v] of Object.entries(live.live||{})){const cur=s.one('SELECT value FROM settings WHERE key=?',[k]);
     if(!cur||at(v)>=at(cur.value))s.run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',[k,v])}}
+// The photos of the readings of the last PHOTO_MONTHS months, kept on the phone from the copy just opened (it holds
+// them anyway), so the roof statement can show and send them, also offline. Older ones are let go.
+const PHOTO_MONTHS=3;
+async function keepPhotos(zip,catalog){
+  try{const want=new Set();
+    for(const p of (catalog.periods||[]).slice(0,PHOTO_MONTHS))for(const t of ['electricity','water'])
+      for(const x of catalog.readings?.[String(p.id)]?.[t]||[])for(const f of x.photos||[])want.add(f.stored);
+    const have=new Set(await photoKeys());
+    for(const k of want)if(!have.has(k)){const f=zip.file('uploads/'+k);if(f)await photoPut(k,await f.async('blob'))}
+    for(const k of have)if(!want.has(k))await photoDel(k)}
+  catch(e){console.warn('Photos not kept:',e)}}
 // Nothing is automatic any more (same as the computer's start-up): every line is an ordinary expense.
 const unlockAll=db=>{db.run('UPDATE expenses SET auto_calculated=0 WHERE auto_calculated=1');db.run('UPDATE expense_template_items SET auto_calculated=0 WHERE auto_calculated=1')};
 // The lists straight from the Drive copy. The computer uploads its changes a few seconds after making them.
 async function lists(tok,key,old){
   const {root,headId}=await locate(tok);
-  const [{db},live]=await Promise.all([openCopy(tok,headId,key),devicesLive(tok,root,key)]);
-  try{const s=new Store(db);mergeDevices(s,live);return await catalogFrom(s,old)}finally{db.close()}}
+  const [{db,zip},live]=await Promise.all([openCopy(tok,headId,key),devicesLive(tok,root,key)]);
+  let catalog;try{const s=new Store(db);mergeDevices(s,live);catalog=await catalogFrom(s,old)}finally{db.close()}
+  await keepPhotos(zip,catalog);return catalog}
 // Apply `entries` straight into the Drive copy. Returns {applied:[ids], failed:{id:reason}, catalog}.
 // If the computer saved a copy at the same moment, start again once from its copy.
 async function run(tok,entries,key){
@@ -421,7 +436,7 @@ async function runOnce(tok,entries,key){
   if(!applied.length){db.close();return {applied,failed,catalog:null}}
   if(db.exec('PRAGMA integrity_check')[0].values[0][0]!=='ok')throw new Error('فحص قاعدة البيانات فشل، ما رفعت شي');
   zip.file('database/home_system.db',db.export(),{createFolders:false});
-  mergeDevices(s,await liveP);const catalog=await catalogFrom(s,CAT);db.close();
+  mergeDevices(s,await liveP);const catalog=await catalogFrom(s,CAT);db.close();await keepPhotos(zip,catalog);
   const rev=crypto.randomUUID().replace(/-/g,''),manifest=JSON.parse(await zip.file('manifest.json').async('string'));
   zip.file('manifest.json',JSON.stringify({...manifest,format:3,revision:rev,parent_revision:head.revision,device_id:'iphone',created_at:new Date().toISOString()}));
   // The computer accepts only files in the archive (drive_sync.validate_snapshot): no folder entries.
