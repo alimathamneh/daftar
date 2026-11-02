@@ -70,6 +70,11 @@ html[data-theme="dark"] .a-gas .ai{background:#3a2016}
 .photos{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
 .photos img{width:74px;height:74px;object-fit:cover;border-radius:12px;border:1px solid var(--border)}
 .ph{position:relative}.ph button{position:absolute;top:-6px;left:-6px;width:24px;height:24px;border-radius:50%;border:0;background:#141b2d;color:#fff;font-size:13px}
+/* A saved photo in the roof statement: ticked = sent with it; unticked = faded. */
+.ph.pickable button{background:#fff;color:transparent;border:2px solid var(--border)}
+.ph.pickable.on button{background:var(--brand);color:#fff;border-color:var(--brand)}
+.ph.pickable:not(.on) img{opacity:.35}
+.ph.pickable small{position:absolute;bottom:4px;right:4px;font-size:13px;line-height:1}
 .pick{display:flex;align-items:center;justify-content:center;gap:8px;min-height:74px;border:1.5px dashed #cdd3e1;border-radius:14px;color:#4b5568;font-weight:700;background:#fafbfd;margin-bottom:12px}
 .pick input{display:none}
 .list .it{display:flex;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid #eef1f5}
