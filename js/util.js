@@ -9,14 +9,19 @@ const dmy=s=>{const p=String(s||'').slice(0,10).split('-');return p.length===3?`
 function toast(msg,err=false){const t=$('#toast');t.textContent=msg;t.className='toast show'+(err?' err':'');clearTimeout(toast.t);toast.t=setTimeout(()=>t.className='toast',3200)}
 const TYPES={expense:{icon:'🧾',name:'مصروف',cls:'a-exp'},electricity:{icon:'⚡',name:'قراءة كهرباء',cls:'a-el'},water:{icon:'💧',name:'قراءة مياه',cls:'a-wa'},payment:{icon:'💳',name:'دفعة قسط',cls:'a-pay'},edit:{icon:'✏️',name:'تعديل',cls:'a-view'},gas:{icon:'🔥',name:'تبديل جرة',cls:'a-gas'},delete:{icon:'🗑',name:'حذف',cls:'a-view'}};
 
-// ---------- IndexedDB: entries (with photo blobs) and settings ----------
-const dbp=new Promise((res,rej)=>{const r=indexedDB.open('home-monthly-phone',1);
-  r.onupgradeneeded=()=>{r.result.createObjectStore('entries',{keyPath:'id'});r.result.createObjectStore('kv')};
+// ---------- IndexedDB: entries (with photo blobs), settings, and the saved photos of recent readings ----------
+const dbp=new Promise((res,rej)=>{const r=indexedDB.open('home-monthly-phone',2);
+  r.onupgradeneeded=()=>{const d=r.result;for(const [n,o] of [['entries',{keyPath:'id'}],['kv'],['photos']])if(!d.objectStoreNames.contains(n))d.createObjectStore(n,o)};
   r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
 async function tx(store,mode,fn){const db=await dbp;return new Promise((res,rej)=>{const t=db.transaction(store,mode);const s=t.objectStore(store);const out=fn(s);t.oncomplete=()=>res(out&&'result' in out?out.result:out);t.onerror=()=>rej(t.error)})}
 const kvGet=k=>tx('kv','readonly',s=>s.get(k));
 const kvSet=(k,v)=>tx('kv','readwrite',s=>s.put(v,k));
 const kvDel=k=>tx('kv','readwrite',s=>s.delete(k));
+// Photos by their stored name in the Drive copy (uploads/<name>): kept for the roof statement, also offline.
+const photoGet=k=>tx('photos','readonly',s=>s.get(k));
+const photoKeys=()=>tx('photos','readonly',s=>s.getAllKeys());
+const photoPut=(k,blob)=>tx('photos','readwrite',s=>s.put(blob,k));
+const photoDel=k=>tx('photos','readwrite',s=>s.delete(k));
 const allEntries=()=>tx('entries','readonly',s=>s.getAll());
 const putEntry=e=>tx('entries','readwrite',s=>s.put(e));
 const delEntry=id=>tx('entries','readwrite',s=>s.delete(id));
