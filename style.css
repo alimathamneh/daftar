@@ -110,3 +110,4 @@ html[data-theme="dark"] .field input.ocr{background:#2e2412;border-color:#8a6a22
 html[data-theme="dark"] .ocrbtn{color:#b9baff}
 html[data-theme="dark"] code{background:#262b40}
 code{direction:ltr;unicode-bidi:isolate;background:#eef0f5;border-radius:6px;padding:1px 5px;font-size:12.5px;word-break:break-all}
+.ll-img{display:block;width:100%;height:auto;border-radius:10px;border:1px solid var(--border)}
