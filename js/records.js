@@ -38,7 +38,8 @@ async function viewScreen(){
     <div class="kpi"><small>المدفوع</small><b class="num">${money(S.paid)}</b></div><div class="kpi"><small>غير المدفوع</small><b class="num">${money(S.unpaid)}</b></div></div>
    ${reportCard(CAT.reports?.[pid])}
    ${(rd.electricity?.[0]||rd.water?.[0])?`<div class="card"><div class="sub">الفواتير</div>${util('electricity',rd.electricity?.[0])}${util('water',rd.water?.[0])}
-     <button class="btn soft" id="roofBtn" style="margin-top:10px">🧾 كشف الروف لهالشهر</button></div>`:''}
+     <button class="btn soft" id="roofBtn" style="margin-top:10px">🧾 كشف الروف لهالشهر</button>
+     <button class="btn soft" id="landlordBtn" style="margin-top:8px">📊 صور صاحب الشقة</button></div>`:''}
    ${catBar}
    <div class="card"><div class="seg"><button type="button" data-f="all" class="${VIEW.filter==='all'?'on':''}">كل المصاريف</button><button type="button" data-f="unpaid" class="${VIEW.filter==='unpaid'?'on':''}">غير المدفوع</button></div>
     ${ex.length?ex.map(e=>{const c=ch['expense:'+e.id],x=withChange(e,c);return `<button class="line ${c?.type==='delete'?'gone':''}" data-edit="expense:${e.id}"><span class="grow"><span>${esc(x.name)} ${tag(c)}</span><small>${esc(x.category||'')}</small></span><span style="text-align:left"><b class="num">${money(x.actual)}</b><br>${badge(x.status)}</span></button>`}).join(''):'<div class="empty">ما في مصاريف.</div>'}</div>
@@ -51,6 +52,34 @@ async function viewScreen(){
   sheet.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{if(closed)return toast('الشهر مسكّر',true);const [k,id]=b.dataset.edit.split(':');editRecord(k,id)});
   sheet.querySelectorAll('[data-ob]').forEach(b=>b.onclick=()=>paymentsScreen(b.dataset.ob));
   $('#roofBtn')&&($('#roofBtn').onclick=()=>roofScreen(pid));
+  $('#landlordBtn')&&($('#landlordBtn').onclick=()=>landlordScreen());
+}
+
+// ---------- landlord images: the water and electricity tables of the last months (drawn by landlord_draw.js, same as the computer) ----------
+async function landlordScreen(){
+  if(!CAT?.meters)return toast('حدّث القوائم من Drive عشان توصل القراءات',true);
+  const D=window.LandlordDraw;D.setFont('Plex, -apple-system, "SF Arabic", Tahoma, sans-serif');await D.ready();
+  let count=Number(localStorage.getItem('landlordCount')||8);
+  const show=()=>{
+    const b=D.build(CAT.meters.water,CAT.meters.electricity,count),stamp=D.stamp();
+    const imgs=[['water','💧 المياه',b.water],['electricity','⚡ الكهرباء',b.electricity]].filter(x=>x[2]);
+    openSheet(`${head('صور صاحب الشقة')}
+     <div class="card"><div class="field"><label>عدد الشهور</label><select id="llCount">${[2,3,4,5,6,8,12,0].map(n=>`<option value="${n}" ${n===count?'selected':''}>${n||'كل السجل'}</option>`).join('')}</select></div>
+      ${b.draft?'<p class="warn">آخر قراءة كهربا لسا مسودة — راجعها قبل ما تبعت.</p>':''}
+      ${imgs.length?'<button class="btn" id="llShareAll">📤 ابعت الصورتين</button>':'<div class="empty">لسا ما في قراءات.</div>'}</div>
+     ${imgs.map(([k,t,cv])=>`<div class="card"><div class="sub">${t}</div><img class="ll-img" src="${cv.toDataURL('image/png')}" alt="">
+      <button class="btn soft" data-share="${k}" style="margin-top:10px">📤 ابعت هالصورة</button></div>`).join('')}
+     <p class="hint" style="text-align:center">الأرقام من آخر تحديث للقوائم: ${dmy(CAT.generated_at)}.</p>`);
+    const file=async(k,cv)=>new File([await D.toBlob(cv)],`${k}-${stamp}.png`,{type:'image/png'});
+    const share=async list=>{const files=await Promise.all(list.map(([k,,cv])=>file(k,cv)));
+      try{if(navigator.canShare&&!navigator.canShare({files}))throw new Error('x');await navigator.share({files})}
+      catch(e){if(e.name==='AbortError')return;for(const f of files){const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=f.name;a.click()}toast('المشاركة مش مدعومة هون، فنزّلت الصور')}};
+    $('#closeSheet').onclick=()=>viewScreen();
+    $('#llCount').onchange=ev=>{count=Number(ev.target.value);localStorage.setItem('landlordCount',count);show()};
+    $('#llShareAll')&&($('#llShareAll').onclick=()=>share(imgs));
+    sheet.querySelectorAll('[data-share]').forEach(x=>x.onclick=()=>share(imgs.filter(i=>i[0]===x.dataset.share)));
+  };
+  show();
 }
 
 // ---------- roof statement: only the roof's numbers, as text or a clean picture to send ----------
