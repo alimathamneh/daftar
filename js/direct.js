@@ -10,7 +10,7 @@
 'use strict';
 const HEAD='home-monthly-head.json';
 const EDITABLE={expense:['name','category','section','budget','actual','paid_amount','status','payment_date','notes'],
-  electricity:['record_date','bill_date','main_current','roof_current','car_current','invoice_amount','fees','notes'],
+  electricity:['record_date','bill_date','main_current','roof_current','car_current','car_km','invoice_amount','fees','notes'],
   water:['record_date','bill_date','total_consumption','roof_current','invoice_amount','notes'],payment:['amount','paid_on','notes'],period:['salary','notes']};
 const TABLES={expense:'expenses',electricity:'electricity',water:'water',payment:'obligation_payments',period:'periods'};
 const DEFAULT_ELECTRIC={tiers:[[300,.05],[300,.10],[null,.20]],fee_split:'half'};
@@ -27,8 +27,10 @@ const money=(v,label,allowZero=false)=>{const n=Number(v);if(!Number.isFinite(n)
 const optMoney=(v,label)=>v===null||v===undefined||String(v).trim()===''?0:money(v,label,true);
 const cleanSection=v=>{v=String(v||'').trim().toLowerCase();if(v==='home')v='apartment';if(v===''||v==='auto')return null;if(!SECTIONS.includes(v))throw new Error('القسم غير صحيح');return v};
 const hex=buf=>[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+// car_km became editable later; it stays out of the version so edits saved on lists from before still go in.
+const UNVERSIONED=new Set(['car_km']);
 async function version(kind,row){const norm=v=>typeof v==='number'?r(v,3).toFixed(3):(v===null||v===undefined?'':String(v));
-  return hex(await crypto.subtle.digest('SHA-1',new TextEncoder().encode(EDITABLE[kind].map(k=>norm(row[k])).join('\x1f')))).slice(0,16)}
+  return hex(await crypto.subtle.digest('SHA-1',new TextEncoder().encode(EDITABLE[kind].filter(k=>!UNVERSIONED.has(k)).map(k=>norm(row[k])).join('\x1f')))).slice(0,16)}
 
 // ---------- libraries, loaded the first time direct mode is used ----------
 let SQLP=null;
