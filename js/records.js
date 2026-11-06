@@ -218,7 +218,7 @@ async function metersScreen(kind=METERS){
    <div class="card">${list.length?list.map((x,i)=>{const prev=list[i+1],c=ch[kind+':'+x.id],d=prev?Number(x.total_consumption||0)-Number(prev.total_consumption||0):null;
      const arrow=d==null||Math.abs(d)<0.0005?'':` <small style="color:${d>0?'var(--red)':'var(--green)'}">${d>0?'↑':'↓'} ${num(Math.abs(d),1)}</small>`;
      return `<button class="line ${c?.type==='delete'?'gone':''}" data-m="${x.id}"><span class="grow"><span>${dmy(x.record_date)}${x.period_date?` · شهر ${esc(monthLabel(x.period_date))}`:''} ${tag(c)}</span>
-       <small>${num(x.total_consumption,1)} ${unit}${arrow}</small></span><span style="text-align:left"><b class="num">${money(total(x))}</b><br>${badge(x.status)}</span></button>`}).join('')
+       <small>${num(x.total_consumption,1)} ${unit}${arrow}${el&&Number(x.car_km)>0?` · 🚗 ${num(x.car_km,0)} كم`:''}</small></span><span style="text-align:left"><b class="num">${money(total(x))}</b><br>${badge(x.status)}</span></button>`}).join('')
      :'<div class="empty">ما في قراءات.</div>'}</div>
    <p class="hint" style="text-align:center">السهم بيقارن الاستهلاك مع القراءة اللي قبلها.</p>`);
   $('#closeSheet').onclick=closeSheet;
@@ -230,7 +230,9 @@ function meterDetail(kind,id){
   const meter=(n,what,a,b,use,u)=>row(n,`${num(a)} → ${num(b)}`)+row(`استهلاك ${what}`,`${num(use,1)} ${u}`);
   const body=el?`
      <div class="card"><div class="sub">العدادات</div>${meter('العداد الرئيسي','الكل',x.main_prev,x.main_current,x.total_consumption,'kWh')}${meter('عداد الروف','الروف',x.roof_prev,x.roof_current,x.roof_consumption,'kWh')}${meter('عداد السيارة','السيارة',x.car_prev,x.car_current,x.car_consumption,'kWh')}
-       ${row('استهلاك الشقة (بدون الروف)',`${num(x.apartment_consumption,1)} kWh`)}${row('استهلاك البيت (بدون السيارة)',`${num(x.home_consumption,1)} kWh`)}${x.car_km?row('كيلومترات السيارة',num(x.car_km,0)):''}</div>
+       ${row('استهلاك الشقة (بدون الروف)',`${num(x.apartment_consumption,1)} kWh`)}${row('استهلاك البيت (بدون السيارة)',`${num(x.home_consumption,1)} kWh`)}</div>
+     ${Number(x.car_km)>0?`<div class="card"><div class="sub">🚗 السيارة</div>${row('الكيلومترات',`${num(x.car_km,0)} كم`)}
+       ${row('كهربا لكل 100 كم',`${num(Number(x.car_consumption||0)/Number(x.car_km)*100,1)} kWh`)}${row('تكلفة الكيلومتر',`${(Number(x.car_amount||0)/Number(x.car_km)).toFixed(3)} JOD`)}</div>`:''}
      <div class="card"><div class="sub">المبالغ</div>${row('البيت',money(x.home_amount))}${row('السيارة',money(x.car_amount))}${row('الشقة (البيت + السيارة)',money(x.apartment_amount))}${row('الروف',money(x.roof_amount))}
        ${row('الرسوم (مقسومة نصين)',money(x.fees))}${row('<b>المجموع</b>',money(Number(x.apartment_amount||0)+Number(x.roof_amount||0)))}</div>`
    :`<div class="card"><div class="sub">الاستهلاك</div>${row('استهلاك الفاتورة',`${num(x.total_consumption,1)} م³`)}${row('عداد الروف',`${num(x.roof_prev)} → ${num(x.roof_current)}`)}${row('استهلاك الروف',`${num(x.roof_consumption,1)} م³`)}${row('استهلاك الشقة',`${num(x.apartment_consumption,1)} م³`)}</div>
