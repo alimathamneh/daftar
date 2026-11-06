@@ -6,7 +6,7 @@ const badge=s=>{const [t,c]=STATUS[s]||[s||'—','no'];return `<span class="st $
 const SECTIONS_AR={auto:'تلقائي',apartment:'الشقة',car:'السيارة',roof:'الروف'};
 const FORMS={
   expense:[['name','اسم المصروف','text'],['category','الفئة','text'],['section','القسم','section'],['budget','الميزانية','num'],['actual','الفعلي','num'],['paid_amount','المدفوع','num'],['status','الحالة','status'],['payment_date','تاريخ الدفع','date'],['notes','ملاحظات','text']],
-  electricity:[['record_date','تاريخ القراءة','date'],['bill_date','تاريخ الفاتورة','date'],['main_current','العداد الرئيسي','num'],['roof_current','عداد الروف','num'],['car_current','عداد السيارة','num'],['invoice_amount','إجمالي الفاتورة','num'],['fees','الرسوم','num'],['notes','ملاحظات','text']],
+  electricity:[['record_date','تاريخ القراءة','date'],['bill_date','تاريخ الفاتورة','date'],['main_current','العداد الرئيسي','num'],['roof_current','عداد الروف','num'],['car_current','عداد السيارة','num'],['car_km','كيلومترات السيارة','num'],['invoice_amount','إجمالي الفاتورة','num'],['fees','الرسوم','num'],['notes','ملاحظات','text']],
   water:[['record_date','تاريخ القراءة','date'],['bill_date','تاريخ الفاتورة','date'],['total_consumption','استهلاك الفاتورة (م³)','num'],['roof_current','عداد الروف','num'],['invoice_amount','إجمالي الفاتورة','num'],['notes','ملاحظات','text']],
   payment:[['amount','المبلغ','num'],['paid_on','تاريخ الدفع','date'],['notes','ملاحظات','text']],
   period:[['salary','الدخل / الراتب','num'],['notes','ملاحظات الشهر','text']]};
