@@ -161,6 +161,7 @@ function paymentForm(){
   const obs=(CAT?.obligations||[]).filter(o=>o.open!==false);
   openSheet(`${head('دفعة قسط أو دين')}<div class="card">
    ${obs.length?`<div class="field"><label>الحساب</label><select id="fOb">${obs.map(o=>`<option value="${o.id}" data-m="${o.monthly_amount||''}">${esc(o.name)} — باقي ${money(o.remaining)}</option>`).join('')}</select></div>`:'<div class="warn" style="margin-bottom:12px">ما في أقساط مفتوحة بالقوائم. حدّث القوائم من Drive.</div>'}
+   <button type="button" class="btn white" id="fNewOb" style="margin-bottom:12px">➕ الحساب مش موجود؟ زيد دين أو قسط جديد</button>
    <div class="row"><div class="field"><label>المبلغ (JOD)</label><input id="fAmount" type="number" inputmode="decimal" step="0.001"></div><div class="field"><label>تاريخ الدفع</label><input id="fDate" type="date" value="${today()}"></div></div>
    <label class="check"><input type="checkbox" id="fLink" checked> سجّلها كمصروف بالشهر</label>
    <div id="linkBox">${periodSelect()}</div>
@@ -168,7 +169,7 @@ function paymentForm(){
    ${photoBlock('صورة الوصل (اختياري)')}
    <button class="btn" id="saveBtn" ${obs.length?'':'disabled'}>احفظ</button></div>`);
   const fill=()=>{const o=$('#fOb')?.selectedOptions[0];if(o?.dataset.m)$('#fAmount').value=o.dataset.m};fill();
-  $('#fOb')&&($('#fOb').onchange=fill);$('#fLink').onchange=()=>$('#linkBox').classList.toggle('hidden',!$('#fLink').checked);
+  $('#fOb')&&($('#fOb').onchange=fill);$('#fNewOb').onclick=()=>CAT?obligationForm():toast('حدّث القوائم من Drive أول',true);$('#fLink').onchange=()=>$('#linkBox').classList.toggle('hidden',!$('#fLink').checked);
   bindPhotos();$('#closeSheet').onclick=closeSheet;
   $('#saveBtn').onclick=()=>{const amount=numv('fAmount');if(!(amount>0))return toast('اكتب المبلغ',true);const o=$('#fOb').selectedOptions[0];
     const link=$('#fLink').checked;if(link&&!val('fPeriod'))return toast('اختار الشهر',true);
