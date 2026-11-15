@@ -7,7 +7,7 @@ const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMon
 const money=v=>`${Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:3})} JOD`;
 const dmy=s=>{const p=String(s||'').slice(0,10).split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:'—'};
 function toast(msg,err=false){const t=$('#toast');t.textContent=msg;t.className='toast show'+(err?' err':'');clearTimeout(toast.t);toast.t=setTimeout(()=>t.className='toast',3200)}
-const TYPES={expense:{icon:'🧾',name:'مصروف',cls:'a-exp'},electricity:{icon:'⚡',name:'قراءة كهرباء',cls:'a-el'},water:{icon:'💧',name:'قراءة مياه',cls:'a-wa'},payment:{icon:'💳',name:'دفعة قسط',cls:'a-pay'},edit:{icon:'✏️',name:'تعديل',cls:'a-view'},gas:{icon:'🔥',name:'تبديل جرة',cls:'a-gas'},delete:{icon:'🗑',name:'حذف',cls:'a-view'}};
+const TYPES={expense:{icon:'🧾',name:'مصروف',cls:'a-exp'},electricity:{icon:'⚡',name:'قراءة كهرباء',cls:'a-el'},water:{icon:'💧',name:'قراءة مياه',cls:'a-wa'},payment:{icon:'💳',name:'دفعة قسط',cls:'a-pay'},obligation:{icon:'📒',name:'دين جديد',cls:'a-pay'},edit:{icon:'✏️',name:'تعديل',cls:'a-view'},gas:{icon:'🔥',name:'تبديل جرة',cls:'a-gas'},delete:{icon:'🗑',name:'حذف',cls:'a-view'}};
 
 // ---------- IndexedDB: entries (with photo blobs), settings, and the saved photos of recent readings ----------
 const dbp=new Promise((res,rej)=>{const r=indexedDB.open('home-monthly-phone',2);
