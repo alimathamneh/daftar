@@ -10,7 +10,7 @@ const FORMS={
   water:[['record_date','تاريخ القراءة','date'],['bill_date','تاريخ الفاتورة','date'],['total_consumption','استهلاك الفاتورة (م³)','num'],['roof_current','عداد الروف','num'],['invoice_amount','إجمالي الفاتورة','num'],['notes','ملاحظات','text']],
   payment:[['amount','المبلغ','num'],['paid_on','تاريخ الدفع','date'],['notes','ملاحظات','text']],
   period:[['salary','الدخل / الراتب','num'],['notes','ملاحظات الشهر','text']]};
-const KIND_AR={expense:'مصروف',electricity:'قراءة كهرباء',water:'قراءة مياه',payment:'دفعة قسط',period:'الشهر'};
+const KIND_AR={expense:'مصروف',electricity:'قراءة كهرباء',water:'قراءة مياه',payment:'دفعة قسط',period:'الشهر',obligation:'دين أو قسط'};
 let VIEW={pid:null,filter:'all',cat:''};
 async function pendingChanges(){const m={};for(const e of await allEntries())if(!e.uploaded_at&&(e.type==='edit'||e.type==='delete'))m[e.data.kind+':'+e.data.id]=e;return m}
 const withChange=(rec,ch)=>ch&&ch.type==='edit'?{...rec,...ch.data.changes}:rec;
@@ -160,7 +160,7 @@ async function paymentsScreen(oid){
 }
 function findRecord(kind,id){const pid=String(VIEW.pid),eq=x=>String(x.id)===String(id);
   if(kind==='expense')return (CAT.expenses?.[pid]||[]).find(eq);if(kind==='period')return (CAT.periods||[]).find(eq);
-  if(kind==='payment')for(const o of CAT.obligations||[]){const p=(o.payments||[]).find(eq);if(p)return {...p,_ob:o}}
+  if(kind==='payment')for(const o of [...(CAT.obligations||[]),...(CAT.archived_obligations||[])]){const p=(o.payments||[]).find(eq);if(p)return {...p,_ob:o}}
   return (CAT.readings?.[pid]?.[kind]||[]).find(eq)||(CAT.meters?.[kind]||[]).find(eq)}
 // backTo: the screen to go back to after saving (the readings or debts screens pass their own).
 async function editRecord(kind,id,backTo){
@@ -377,24 +377,32 @@ function energyScreen(again=false){
 
 // ---------- debts and installments: the details and every payment ----------
 const OB_KIND={installment:'قسط',owed_to_me:'إلي عند حدا',i_owe:'علي لحدا'};
-function debtsScreen(){
+const findOb=oid=>[...(CAT.obligations||[]),...(CAT.archived_obligations||[])].find(x=>String(x.id)===String(oid));
+async function debtsScreen(){
   if(!CAT)return toast('حدّث القوائم من Drive أول',true);
+  const ch=await pendingChanges(),fresh=(await allEntries()).filter(e=>e.type==='obligation'&&!e.uploaded_at);
   const obs=(CAT.obligations||[]).slice().sort((a,b)=>(b.open-a.open)||String(a.next_due_date||'9').localeCompare(String(b.next_due_date||'9')));
   const sum=k=>obs.filter(o=>o.kind===k&&o.open).reduce((t,o)=>t+Number(o.remaining||0),0);
   const bar=p=>`<div style="height:6px;border-radius:9px;background:#eef0f5;margin-top:6px;overflow:hidden"><div style="height:100%;width:${Math.min(100,Math.max(0,Number(p)||0))}%;background:var(--green)"></div></div>`;
+  const arch=CAT.archived_obligations||[];
   openSheet(`${head('الديون والأقساط')}
    <div class="kpis"><div class="kpi"><small>باقي الأقساط</small><b class="num">${money(sum('installment'))}</b></div><div class="kpi"><small>علي لحدا</small><b class="num">${money(sum('i_owe'))}</b></div>
     <div class="kpi wide"><small>إلي عند الناس</small><b class="num">${money(sum('owed_to_me'))}</b></div></div>
-   <div class="card">${obs.length?obs.map(o=>`<button class="line" data-ob="${o.id}" style="display:block"><span style="display:flex;justify-content:space-between;gap:8px"><span class="grow"><span>${esc(o.name)} <span class="st ${o.open?(o.overdue?'wait':'part'):'done'}" style="display:inline-block">${o.open?(o.overdue?'متأخر':OB_KIND[o.kind]||''):'خلص ✓'}</span></span>
+   <button class="btn" id="dNew" style="margin-bottom:12px">➕ دين أو قسط جديد</button>
+   ${fresh.length?`<div class="card"><div class="sub">لسا ما انرفعوا</div>${fresh.map(e=>`<div class="line"><span class="grow"><span>${esc(e.data.name)} <span class="st edit">بانتظار الحفظ</span></span><small>${OB_KIND[e.data.kind]||''}</small></span><b class="num">${money(e.data.total_amount)}</b></div>`).join('')}</div>`:''}
+   <div class="card">${obs.length?obs.map(o=>`<button class="line" data-ob="${o.id}" style="display:block"><span style="display:flex;justify-content:space-between;gap:8px"><span class="grow"><span>${esc(o.name)} <span class="st ${o.open?(o.overdue?'wait':'part'):'done'}" style="display:inline-block">${o.open?(o.overdue?'متأخر':OB_KIND[o.kind]||''):'خلص ✓'}</span> ${tag(ch['obligation:'+o.id])}</span>
       <small>${o.next_due_date?`الاستحقاق الجاي ${dmy(o.next_due_date)}`:o.counterparty?esc(o.counterparty):''}</small></span><span style="text-align:left"><b class="num">${money(o.remaining)}</b><br><small>باقي</small></span></span>${bar(o.progress)}</button>`).join('')
-     :'<div class="empty">ما في ديون أو أقساط.</div>'}</div>`);
-  $('#closeSheet').onclick=closeSheet;
+     :'<div class="empty">ما في ديون أو أقساط.</div>'}</div>
+   ${arch.length?`<div class="card"><div class="sub">المؤرشفة (${arch.length})</div>${arch.map(o=>`<button class="line" data-ob="${o.id}"><span class="grow"><span>${esc(o.name)} ${tag(ch['obligation:'+o.id])}</span><small>${OB_KIND[o.kind]||''}</small></span><b class="num">${money(o.total)}</b></button>`).join('')}</div>`:''}`);
+  $('#closeSheet').onclick=closeSheet;$('#dNew').onclick=()=>obligationForm();
   sheet.querySelectorAll('[data-ob]').forEach(b=>b.onclick=()=>debtDetail(b.dataset.ob));
 }
 async function debtDetail(oid){
-  const o=(CAT.obligations||[]).find(x=>String(x.id)===String(oid));if(!o)return;const ch=await pendingChanges();
+  const o=findOb(oid);if(!o)return;const ch=await pendingChanges(),mine=ch['obligation:'+o.id],arch=o.status==='archived';
   const inst=o.total_installments?`${o.paid_installments} / ${o.total_installments}`:'—';
   openSheet(`${head(esc(o.name))}
+   ${arch?'<p class="warn">هالحساب مؤرشف. رجّعه لتسجّل عليه دفعات.</p>':''}
+   ${mine?`<p class="warn">${mine.type==='delete'?'في طلب حذف لهالحساب لسا ما انرفع.':'في تعديل لهالحساب لسا ما انرفع.'}</p>`:''}
    <div class="kpis"><div class="kpi"><small>الباقي</small><b class="num">${money(o.remaining)}</b></div><div class="kpi"><small>المدفوع</small><b class="num">${money(o.paid)}</b></div>
     <div class="kpi wide"><small>الإجمالي · ${num(o.progress,1)}% انْدفع</small><b class="num">${money(o.total)}</b></div></div>
    <div class="card">${row('النوع',OB_KIND[o.kind]||o.kind)}${o.counterparty?row('مع مين',esc(o.counterparty)):''}${o.monthly_amount?row('القسط الشهري',money(o.monthly_amount)):''}
@@ -403,9 +411,56 @@ async function debtDetail(oid){
      ${o.notes?`<p class="hint">${esc(o.notes)}</p>`:''}</div>
    <div class="card"><div class="sub">كل الدفعات (${(o.payments||[]).length})</div>${(o.payments||[]).map(p=>{const c=ch['payment:'+p.id],x=withChange(p,c);return `<button class="line ${c?.type==='delete'?'gone':''}" data-pay="${p.id}"><span class="grow"><span>${dmy(x.paid_on)} ${tag(c)}</span><small>${esc(x.notes||'')}</small></span><b class="num">${money(x.amount)}</b></button>`}).join('')||'<div class="empty">ما في دفعات.</div>'}</div>
    ${o.open?'<button class="btn" id="dPay">💳 سجّل دفعة</button>':''}
+   <button class="btn white" id="dEdit" style="margin-top:10px">✏️ عدّل</button>
+   <button class="btn white" id="dArch" style="margin-top:10px">${arch?'↩️ رجّعه من الأرشيف':'📦 سكّره (أرشفة)'}</button>
+   ${(o.payments||[]).length?'':'<button class="btn danger" id="dDel" style="margin-top:10px">🗑 احذف</button>'}
+   ${mine?'<button class="btn white" id="dUndo" style="margin-top:10px">ألغِ الطلب اللي لسا ما انرفع</button>':''}
    <button class="btn white" id="dBack" style="margin-top:10px">رجوع للديون</button>`);
   $('#closeSheet').onclick=closeSheet;$('#dBack').onclick=debtsScreen;
   $('#dPay')&&($('#dPay').onclick=()=>{paymentForm();const s=$('#fOb');if(s){s.value=String(o.id);s.dispatchEvent(new Event('change'))}});
   sheet.querySelectorAll('[data-pay]').forEach(b=>b.onclick=()=>editRecord('payment',b.dataset.pay,()=>debtDetail(o.id)));
+  $('#dEdit').onclick=()=>obligationForm(o);
+  $('#dArch').onclick=()=>{const to=arch?'active':'archived';
+    if(!arch&&o.remaining>.0005&&!confirm(`لسا باقي عليه ${money(o.remaining)}. تسكّره وتخبّيه من القائمة؟`))return;
+    queueObligation(o,'edit',{changes:{status:to},before:{status:o.status}},to==='archived'?'انحفظ ✓ بيتسكّر أول ما يترفع':'انحفظ ✓ بيرجع أول ما يترفع')};
+  $('#dDel')&&($('#dDel').onclick=()=>{if(confirm(`تحذف "${o.name}"؟ بينحذف من البرنامج أول ما يصير في نت.`))queueObligation(o,'delete',{before:{}},'انحفظ طلب الحذف ✓')});
+  $('#dUndo')&&($('#dUndo').onclick=async()=>{await delEntry(mine.id);toast('انلغى الطلب');debtDetail(o.id)});
+}
+// An edit or delete of a debt, saved like the other edits (editRecord) and checked against the version the phone saw.
+async function queueObligation(o,type,data,msg){
+  if(!o.v)return toast('حدّث القوائم من Drive أول، وبعدين جرّب',true);
+  const old=(await pendingChanges())['obligation:'+o.id];if(old)await delEntry(old.id);
+  await putEntry({id:crypto.randomUUID(),type,created_at:new Date().toISOString(),period_id:null,period_label:'',data:{kind:'obligation',id:Number(o.id),v:o.v,label:o.name,...data},photos:[]});
+  toast(msg);type==='delete'?debtsScreen():debtDetail(o.id);syncNow()}
+// New debt or installment (o empty), or edit an existing one.
+function obligationForm(o){
+  const edit=!!o,locked=edit&&(o.payments||[]).length>0,k0=o?.kind||'installment';
+  openSheet(`${head(edit?'تعديل '+esc(o.name):'دين أو قسط جديد')}<div class="card">
+   <div class="field"><label>النوع</label><select id="oKind" ${locked?'disabled':''}>${Object.entries(OB_KIND).map(([k,l])=>`<option value="${k}" ${k===k0?'selected':''}>${l}</option>`).join('')}</select>
+     ${locked?'<span class="hint">النوع ما بيتغيّر بعد ما انسجّلت دفعات.</span>':''}</div>
+   <div class="field"><label>الاسم</label><input id="oName" value="${esc(o?.name||'')}" maxlength="140"></div>
+   <div class="field"><label>مع مين (اختياري)</label><input id="oWho" value="${esc(o?.counterparty||'')}" maxlength="140"></div>
+   <div class="field"><label>المبلغ الكلي (JOD)</label><input id="oTotal" type="number" inputmode="decimal" step="0.001" value="${o?.total_amount??''}">${edit&&o.paid>0?`<span class="hint">اندفع منه ${money(o.paid)}</span>`:''}</div>
+   <div id="oInst"><div class="row"><div class="field"><label>القسط الشهري</label><input id="oMonthly" type="number" inputmode="decimal" step="0.001" value="${o?.monthly_amount||''}"></div>
+     <div class="field"><label>عدد الأقساط (اختياري)</label><input id="oPlan" type="number" inputmode="numeric" step="1" value="${o?.planned_installments??''}"></div></div></div>
+   <div class="field"><label id="oDueL">أول استحقاق</label><input id="oDue" type="date" value="${esc(String(o?.first_due_date||'').slice(0,10))}"></div>
+   <div class="field"><label>ملاحظات</label><input id="oNotes" value="${esc(o?.notes||'')}"></div>
+   <button class="btn" id="oSave">${edit?'احفظ التعديل':'احفظ'}</button>
+   <button class="btn white" id="oBack" style="margin-top:10px">رجوع</button></div>`);
+  const kindNow=()=>$('#oKind').value,show=()=>{const inst=kindNow()==='installment';$('#oInst').classList.toggle('hidden',!inst);$('#oDueL').textContent=inst?'أول استحقاق':'موعد السداد (اختياري)'};show();
+  $('#oKind').onchange=show;$('#closeSheet').onclick=closeSheet;$('#oBack').onclick=()=>edit?debtDetail(o.id):debtsScreen();
+  $('#oSave').onclick=()=>{const inst=kindNow()==='installment',total=numv('oTotal'),plan=inst?numv('oPlan'):null;
+    const d={name:val('oName'),kind:kindNow(),counterparty:val('oWho'),total_amount:total,monthly_amount:inst?(numv('oMonthly')||0):0,
+      planned_installments:plan,first_due_date:val('oDue')||null,notes:val('oNotes')};
+    if(!d.name)return toast('اكتب الاسم',true);if(!(total>0))return toast('اكتب المبلغ الكلي',true);
+    if(d.monthly_amount<0)return toast('القسط الشهري غير صحيح',true);
+    if(plan!==null&&!(Number.isInteger(plan)&&plan>=1&&plan<=1200))return toast('عدد الأقساط رقم صحيح بين 1 و 1200',true);
+    if(!edit)return putEntry({id:crypto.randomUUID(),type:'obligation',created_at:new Date().toISOString(),period_id:null,period_label:'',data:d,photos:[]})
+      .then(()=>{toast(navigator.onLine?'انحفظ ✓ وبيترفع هلأ':'انحفظ على الآيفون ✓');debtsScreen();syncNow()});
+    if(total+.001<Number(o.paid||0))return toast(`المبلغ الكلي أقل من اللي اندفع (${money(o.paid)})`,true);
+    const same=(a,b)=>typeof b==='number'||typeof a==='number'?(a==null||a==='')===(b==null||b==='')&&Math.abs(Number(a||0)-Number(b||0))<.0005:String(a??'')===String(b??'');
+    const changes={};for(const [k,v] of Object.entries(d))if(!same(k==='first_due_date'?String(o[k]||'').slice(0,10)||null:o[k],v))changes[k]=v;
+    if(!Object.keys(changes).length)return toast('ما غيّرت شي');
+    queueObligation(o,'edit',{changes,before:Object.fromEntries(Object.keys(changes).map(k=>[k,o[k]??null]))},'انحفظ التعديل ✓')};
 }
 
