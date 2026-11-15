@@ -11,11 +11,13 @@
 const HEAD='home-monthly-head.json';
 const EDITABLE={expense:['name','category','section','budget','actual','paid_amount','status','payment_date','notes'],
   electricity:['record_date','bill_date','main_current','roof_current','car_current','car_km','invoice_amount','fees','notes'],
-  water:['record_date','bill_date','total_consumption','roof_current','invoice_amount','notes'],payment:['amount','paid_on','notes'],period:['salary','notes']};
-const TABLES={expense:'expenses',electricity:'electricity',water:'water',payment:'obligation_payments',period:'periods'};
+  water:['record_date','bill_date','total_consumption','roof_current','invoice_amount','notes'],payment:['amount','paid_on','notes'],period:['salary','notes'],
+  obligation:['name','kind','counterparty','total_amount','monthly_amount','first_due_date','planned_installments','notes','status']};
+const TABLES={expense:'expenses',electricity:'electricity',water:'water',payment:'obligation_payments',period:'periods',obligation:'obligations'};
 const DEFAULT_ELECTRIC={tiers:[[300,.05],[300,.10],[null,.20]],fee_split:'half'};
 const DEFAULT_WATER={water_base:2.5,sewer_base:.23,water_rates:[.6,.8,1.1,1.4,1.8,2.2],sewer_rates:[.15,.5,.7,.85,.95,1.2],bounds:[6,12,18,24,30,42]};
 const SECTIONS=['apartment','car','roof'];
+const OB_KINDS=['installment','owed_to_me','i_owe'];
 
 // ---------- small helpers (same meaning as in app.py) ----------
 const sf=v=>{if(v===null||v===undefined||v==='')return 0;const n=Number(v);return Number.isFinite(n)?n:0};
@@ -154,6 +156,29 @@ class Home{
   deletePayment(id){const p=this.s.one('SELECT * FROM obligation_payments WHERE id=?',[id]);if(!p)throw new Error('الدفعة مش موجودة');this.dropPaymentExpense(p.expense_id);
     for(const f of this.s.all('SELECT stored_name FROM attachments WHERE obligation_payment_id=?',[id]))this.zip.remove('uploads/'+f.stored_name);
     this.s.run('DELETE FROM attachments WHERE obligation_payment_id=?',[id]);this.s.run('DELETE FROM obligation_payments WHERE id=?',[id]);this.audit('delete','obligation_payment',id)}
+  // Debts and installments (validate_obligation and the /api/obligations handlers on the computer).
+  cleanObligation(d){const name=String(d.name||'').trim(),kind=d.kind;if(!name||name.length>140)throw new Error('اكتب اسم الحساب (لحد 140 حرف)');
+    if(!OB_KINDS.includes(kind))throw new Error('اختار النوع: قسط أو دين');const inst=kind==='installment';
+    let plan=d.planned_installments;if(plan===null||plan===undefined||plan==='')plan=null;
+    else{plan=Number(plan);if(!Number.isInteger(plan))throw new Error('عدد الأقساط لازم رقم صحيح');if(plan<1||plan>1200)throw new Error('عدد الأقساط بين 1 و 1200')}
+    const status=d.status||'active';if(!['active','archived'].includes(status))throw new Error('حالة الحساب غير صحيحة');
+    return {name,kind,counterparty:String(d.counterparty||'').trim().slice(0,140),total_amount:money(d.total_amount,'المبلغ الكلي'),
+      monthly_amount:inst?money(d.monthly_amount||0,'القسط الشهري',true):0,first_due_date:isoDay(d.first_due_date,'أول استحقاق',true),
+      planned_installments:inst?plan:null,notes:String(d.notes||'').slice(0,3000),status}}
+  addObligation(d){const c=this.cleanObligation(d),keys=Object.keys(c);
+    const id=this.s.run(`INSERT INTO obligations(${keys.join(',')},created_at,updated_at) VALUES(${keys.map(()=>'?').join(',')},?,?)`,[...Object.values(c),nowIso(),nowIso()]);
+    this.audit('create','obligation',id,c.name);return id}
+  updateObligation(id,d){const old=this.s.one('SELECT * FROM obligations WHERE id=?',[id]);if(!old)throw new Error('الحساب مش موجود');
+    const c=this.cleanObligation({...old,...d});const paid=r(sf(this.s.one('SELECT COALESCE(SUM(amount),0) t FROM obligation_payments WHERE obligation_id=?',[id]).t),3);
+    if(c.total_amount+0.001<paid)throw new Error(`المبلغ الكلي أقل من اللي اندفع (${paid.toFixed(3)})`);
+    if(c.kind!==old.kind&&this.s.one('SELECT COUNT(*) n FROM obligation_payments WHERE obligation_id=?',[id]).n)throw new Error('ما بتقدر تغيّر النوع بعد ما انسجّلت دفعات');
+    this.s.run('UPDATE obligations SET name=?,kind=?,counterparty=?,total_amount=?,monthly_amount=?,first_due_date=?,planned_installments=?,notes=?,status=?,updated_at=? WHERE id=?',
+      [c.name,c.kind,c.counterparty,c.total_amount,c.monthly_amount,c.first_due_date,c.planned_installments,c.notes,c.status,nowIso(),id]);
+    this.audit('update','obligation',id,c.name)}
+  deleteObligation(id){if(!this.s.one('SELECT 1 FROM obligations WHERE id=?',[id]))throw new Error('الحساب مش موجود');
+    if(this.s.one('SELECT COUNT(*) n FROM obligation_payments WHERE obligation_id=?',[id]).n)throw new Error('عليه دفعات، أرشفه بدل ما تحذفه');
+    for(const f of this.s.all('SELECT stored_name FROM attachments WHERE obligation_id=?',[id]))this.zip.remove('uploads/'+f.stored_name);
+    this.s.run('DELETE FROM attachments WHERE obligation_id=?',[id]);this.s.run('DELETE FROM obligations WHERE id=?',[id]);this.audit('delete','obligation',id)}
   async attach(photos,rel){for(const ph of photos||[]){const bytes=new Uint8Array(await ph.blob.arrayBuffer());const ext=(ph.blob.type||'').includes('png')?'.png':'.jpg';
       const stored=hex(crypto.getRandomValues(new Uint8Array(16)))+ext;this.zip.file('uploads/'+stored,bytes,{createFolders:false});
       const id=this.s.run('INSERT INTO attachments(period_id,expense_id,electricity_id,water_id,file_name,stored_name,mime_type,category) VALUES(?,?,?,?,?,?,?,?)',
@@ -176,11 +201,12 @@ class Home{
         const id=this.addReading(e.type,body);await this.attach(e.photos,{period_id:pid,[e.type+'_id']:id,category:'Meter Photo'});return}
       if(e.type==='payment'){const id=this.addPayment(d.obligation_id,{amount:d.amount,paid_on:d.paid_on,notes:[d.notes,'(من الآيفون)'].filter(Boolean).join(' '),link_to_expenses:!!d.link_to_expenses,period_id:d.link_to_expenses?pid:null});
         await this.attach(e.photos,{obligation_id:d.obligation_id,obligation_payment_id:id,category:'Bill'});return}
+      if(e.type==='obligation'){this.addObligation({...d,notes:[d.notes,'(من الآيفون)'].filter(Boolean).join(' ')});return}
       if(e.type==='edit'||e.type==='delete'){const now=this.current(d.kind,d.id);if(!now)throw new Error('البند ما عاد موجود');
         if(await version(d.kind,now)!==d.v)throw new Error('تغيّر عالكمبيوتر بعد ما الآيفون شافه');const ch=d.changes||{};
-        if(e.type==='delete'){({expense:()=>this.deleteExpense(d.id),electricity:()=>this.deleteReading('electricity',d.id),water:()=>this.deleteReading('water',d.id),payment:()=>this.deletePayment(d.id)}[d.kind]||(()=>{throw new Error('ما بينحذف من الآيفون')}))();return}
+        if(e.type==='delete'){({expense:()=>this.deleteExpense(d.id),electricity:()=>this.deleteReading('electricity',d.id),water:()=>this.deleteReading('water',d.id),payment:()=>this.deletePayment(d.id),obligation:()=>this.deleteObligation(d.id)}[d.kind]||(()=>{throw new Error('ما بينحذف من الآيفون')}))();return}
         // An edit of a reading may only add photos (no field changed); they join the reading like the add form's.
-        if(Object.keys(ch).length)({expense:()=>this.updateExpense(d.id,{...ch}),electricity:()=>this.updateReading('electricity',d.id,ch),water:()=>this.updateReading('water',d.id,ch),payment:()=>this.updatePayment(d.id,ch),period:()=>this.updatePeriod(d.id,ch)}[d.kind])();
+        if(Object.keys(ch).length)({expense:()=>this.updateExpense(d.id,{...ch}),electricity:()=>this.updateReading('electricity',d.id,ch),water:()=>this.updateReading('water',d.id,ch),payment:()=>this.updatePayment(d.id,ch),period:()=>this.updatePeriod(d.id,ch),obligation:()=>this.updateObligation(d.id,ch)}[d.kind])();
         if(d.kind==='electricity'||d.kind==='water')await this.attach(e.photos,{period_id:this.current(d.kind,d.id).period_id,[d.kind+'_id']:d.id,category:'Meter Photo'});return}
       if(e.type==='gas'){this.s.run('INSERT OR IGNORE INTO gas_swaps(id,cylinder,swapped_on,price,by,created_at) VALUES(?,?,?,?,?,?)',[d.id,(d.cylinder||'المطبخ').slice(0,40),isoDay(d.swapped_on,'التاريخ'),d.price??null,d.by||'',new Date().toISOString()]);return}
       if(e.type==='shopping'){for(const op of Object.values(d.ops||{})){const old=this.s.one('SELECT updated_at FROM shopping_items WHERE id=?',[op.id]);if(old&&old.updated_at>=op.updated_at)continue;
@@ -348,10 +374,12 @@ async function catalogFrom(s,old){
   const avgE=s.one('SELECT AVG(total_consumption) main,AVG(roof_consumption) roof,AVG(car_consumption) car FROM (SELECT * FROM electricity ORDER BY record_date DESC LIMIT 6)')||{};
   const avgW=s.one('SELECT AVG(roof_consumption) w FROM (SELECT * FROM water ORDER BY record_date DESC LIMIT 6)')||{};
   const avg_use={main:r(sf(avgE.main),1),roof:r(sf(avgE.roof),1),car:r(sf(avgE.car),1),water_roof:r(sf(avgW.w),1)};
-  const obligations=[];for(const o of s.all("SELECT * FROM obligations WHERE COALESCE(status,'active')!='archived' ORDER BY name")){
-    const sm=obligationSummary(s,o);
-    obligations.push({id:o.id,name:o.name,kind:o.kind,counterparty:o.counterparty||'',monthly_amount:o.monthly_amount,total:o.total_amount,
-      paid:sm.paid,remaining:sm.remaining,open:sm.remaining>.0005,progress:sm.progress,first_due_date:o.first_due_date,next_due_date:sm.next_due,overdue:sm.overdue,
+  // Archived accounts go in their own list, so only the debts screen sees them (to bring one back).
+  const obligations=[],archived_obligations=[];for(const o of s.all('SELECT * FROM obligations ORDER BY name')){
+    const sm=obligationSummary(s,o),arch=(o.status||'active')==='archived';
+    (arch?archived_obligations:obligations).push({id:o.id,name:o.name,kind:o.kind,counterparty:o.counterparty||'',monthly_amount:o.monthly_amount,total:o.total_amount,total_amount:o.total_amount,
+      planned_installments:o.planned_installments,status:o.status||'active',v:await version('obligation',o),
+      paid:sm.paid,remaining:sm.remaining,open:!arch&&sm.remaining>.0005,progress:sm.progress,first_due_date:o.first_due_date,next_due_date:sm.next_due,overdue:sm.overdue,
       paid_installments:sm.paid_installments,total_installments:sm.total_installments,notes:o.notes||'',
       payments:await withV('payment',s.all('SELECT id,amount,paid_on,notes,period_id,expense_id FROM obligation_payments WHERE obligation_id=? ORDER BY paid_on DESC,id DESC',[o.id]))})}
   // Every reading with all its numbers, newest first, for the readings history screen.
@@ -360,7 +388,7 @@ async function catalogFrom(s,old){
   for(const x of [...meters.electricity,...meters.water]){delete x.tariff_snapshot;x.closed=!!periods.find(p=>p.id===x.period_id&&p.status==='closed')}
   const items=s.all('SELECT * FROM shopping_items WHERE deleted=0 ORDER BY in_cart,updated_at DESC');
   const reports={};for(const p of periods)if(p.status==='closed')reports[String(p.id)]=monthReport(s,p.id);
-  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,names,categories,avg_use,gas:gasState(s),reports,breaker:breakerSummary(s),samsung:samsungSummary(s),energy:energySummary(s),
+  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,archived_obligations,names,categories,avg_use,gas:gasState(s),reports,breaker:breakerSummary(s),samsung:samsungSummary(s),energy:energySummary(s),
     shopping:{items:items.filter(x=>!x.staple),staples:items.filter(x=>x.staple),names:s.all('SELECT DISTINCT name FROM shopping_items ORDER BY name').map(x=>x.name)},
     last_electricity:s.one('SELECT record_date,main_current,roof_current,car_current FROM electricity ORDER BY record_date DESC,id DESC LIMIT 1')||{},
     last_water:s.one('SELECT record_date,roof_current,total_consumption FROM water ORDER BY record_date DESC,id DESC LIMIT 1')||{},
