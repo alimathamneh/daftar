@@ -250,7 +250,7 @@ function meterDetail(kind,id){
   $('#mEdit')&&($('#mEdit').onclick=()=>{VIEW.pid=x.period_id;editRecord(kind,x.id,()=>metersScreen(kind))});
 }
 
-// ---------- both ACs, as the computer recorded them (read only here) ----------
+// ---------- every device the TV box runs: its state now, its controls and what happened ----------
 const AC_EVENTS={on:'اشتغل',off:'انطفى',fault:'عطل',voltage:'الفولت برّا الطبيعي',offline:'انقطع الاتصال',online:'رجع الاتصال',gap:'استهلاك ناقص',catchup:'استهلاك وقت الكمبيوتر مطفي'};
 const phoneEvent=d=>d==='on'?'اشتغل من الآيفون':d==='off'?'انطفى من الآيفون':String(d).startsWith('setpoint ')?`الدرجة ${d.slice(9)}° من الآيفون`:'من الآيفون';
 // A device switched from the phone: the command goes to the TV box over Drive (Direct.command); the box answers in
@@ -272,46 +272,67 @@ async function deviceCmd(cmd,ask,doneMsg,again){
   finally{CMD_BUSY=false;if(sheet.innerHTML)again()}}
 const AC_FAULTS={ov_cr:'تيار زايد',ov_vol:'فولت عالي',ov_pwr:'حمل زايد',ls_cr:'تيار قليل',ls_vol:'فولت واطي',ls_pow:'حمل قليل'};
 const AC_MODES={auto:'تلقائي',cool:'تبريد',dry:'تجفيف',wind:'مروحة بس',heat:'تدفئة'};
-const AC_COLOR={living:'var(--brand,#5b5cf0)',bedroom:'#0ea5a4'};
-function acScreen(){
-  const list=[CAT?.samsung&&{key:'bedroom',name:'غرفة النوم',d:CAT.samsung},CAT?.breaker&&{key:'living',name:'الصالون',d:CAT.breaker}].filter(Boolean);
-  if(!list.length)return toast('ما في بيانات للمكيفات لسا',true);
-  const cost=v=>v==null?'':`<span dir="ltr">${money(v)}</span>`,sum=k=>list.reduce((t,x)=>t+(x.d[k]||0),0),costSum=k=>list.every(x=>x.d[k]==null)?null:sum(k);
-  const status=L=>!L||L.online===false?'<span class="st no">مش متصل</span>':L.on?'<span class="st done">شغّال</span>':'<span class="st wait">مطفي</span>';
-  const tot=i=>list.reduce((t,x)=>t+(x.d.hourly[i].kwh||0),0),max=Math.max(0.001,...list[0].d.hourly.map((_,i)=>tot(i)));
-  const chart=`<div style="display:flex;align-items:flex-end;gap:2px;height:90px;direction:ltr;margin-top:6px">${list[0].d.hourly.map((h,i)=>!tot(i)
-      ?`<div title="${h.hour}:00" style="flex:1;height:2px;background:var(--border,#e5e7eb)"></div>`
-      :`<div title="${h.hour}:00" style="flex:1;display:flex;flex-direction:column-reverse;border-radius:3px 3px 0 0;overflow:hidden">${list.map(x=>x.d.hourly[i].kwh?`<div style="height:${Math.max(2,x.d.hourly[i].kwh/max*86)}px;background:${AC_COLOR[x.key]}"></div>`:'').join('')}</div>`).join('')}</div>
-    <div style="display:flex;justify-content:space-between;direction:ltr;font-size:11px;color:var(--muted)"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>
-    ${list.length>1?`<div class="hint" style="display:flex;gap:12px;margin-top:6px">${list.map(x=>`<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${AC_COLOR[x.key]}"></span> ${x.name}</span>`).join('')}</div>`:''}`;
-  const card=x=>{const L=x.d.live,head=`<div class="sub">❄️ مكيف ${x.name}</div>${row('الحالة',status(L))}`;
-    const own=x.key==='bedroom'?(L?`${row('الوضع',esc(AC_MODES[L.mode]||L.mode||'—'))}${row('الدرجة المضبوطة',`${num(L.setpoint,0)}°`)}${row('حرارة الغرفة',`${num(L.temperature,0)}°`)}${row('الرطوبة',`${num(L.humidity,0)}%`)}${row('القدرة',`${num(L.power,0)} W`)}${L.windfree?row('WindFree','✓'):''}`:'')
-      :(L?`${row('القدرة',`${num(L.power,1)} W`)}${row('الفولت',`${num(L.voltage,1)} V`)}${(L.faults||[]).length?row('<span style="color:var(--red)">عطل</span>',esc(L.faults.map(f=>AC_FAULTS[f]||f).join('، '))):''}`:'');
-    const ok=L&&L.online!==false;
-    const ctl=!ok?'':`<div style="display:flex;gap:8px;margin-top:10px">${x.key==='bedroom'&&L.on?`<button class="btn white" data-sp="-1" style="width:auto;padding:8px 16px" ${L.setpoint<=(L.min??16)?'disabled':''}>➖</button>
+const HEATING=50;   // watts: the breakers stay on with the AC on standby or the heater's thermostat idle
+const DEV_ORDER=['living','bedroom','geyser','dryer'],DEV_ICON={living:'❄️',bedroom:'❄️',geyser:'🔥',dryer:'👕'};
+// What the box runs on each device's breaker or account: the power command's target.
+const DEV_TARGET={living:'breaker',bedroom:'samsung',geyser:'geyser'};
+// Using power now (the home screen counts these).
+const deviceRunning=x=>{const L=x.live;if(!L||L.online===false)return false;
+  return x.key==='dryer'?L.state==='run':x.key==='bedroom'?!!L.on:!!L.on&&L.power>=HEATING};
+// Minutes since the box last put its readings on Drive: every minute while it is awake.
+const boxAge=()=>{const t=CAT?.box_at?new Date(String(CAT.box_at).replace(' ','T')).getTime():NaN;return isNaN(t)?null:Math.max(0,Math.round((Date.now()-t)/60000))};
+const ago=m=>m<1?'هلأ':m<60?`${m} دقيقة`:m<1440?`${Math.round(m/60)} ساعة`:`${Math.round(m/1440)} يوم`;
+// The box's live file, fetched straight from Drive (a few KB) when the screen opens and on "refresh".
+async function refreshDevices(interactive){
+  if(!navigator.onLine)return interactive&&toast('بدك إنترنت لتحديث الحالة',true);
+  const key=await kvGet('key');if(!key)return interactive&&toast('اضغط "تحديث القوائم" أول عشان تدخل كلمة التشفير',true);
+  const tok=interactive?await token('refresh'):await validToken();if(!tok)return;
+  try{const live=await Direct.liveNow(tok,key);if(!live)return interactive&&toast('ما لقيت قراءات البوكس على Drive',true);
+    CAT=Direct.applyLive(CAT,live);await kvSet('catalog',CAT);if(sheet.innerHTML&&$('#devRefresh'))devicesScreen(true);if(interactive)toast('تحدّثت الحالة ✓')}
+  catch(e){if(!interactive)return;if(e.reauth)signIn('refresh');else toast(e.message,true)}}
+function devicesScreen(again=false){
+  const en=CAT?.energy,devs=DEV_ORDER.map(k=>en?.devices?.find(x=>x.key===k)).filter(Boolean);
+  if(!devs.length)return toast('ما في بيانات للأجهزة لسا',true);
+  const age=boxAge();
+  const box=age==null?row('📡 البوكس','<span class="hint">ما وصل منه إشي لسا</span>')
+    :age<=3?row('📡 البوكس',`<span class="st done">صاحي</span> <small class="hint">آخر تحديث ${age<1?'هلأ':'قبل '+ago(age)}</small>`)
+    :`${row('📡 البوكس',`<span class="st no">ما بيرد من ${ago(age)}</span>`)}<p class="hint" style="margin:4px 0 0">آخر إشي وصل منه ${esc(when(CAT.box_at))}. يمكن نايم من الريموت أو مطفي: الأوامر ما بتوصل لحد ما يصحى، والاستهلاك بيرجع ينحسب أول ما يصحى.</p>`;
+  const st=(cls,t)=>`<span class="st ${cls}">${t}</span>`,W=v=>`<span dir="ltr">${num(v,0)} W</span>`;
+  const status=x=>{const L=x.live;if(!L)return st('no','ما في قراءة');
+    if(x.key==='dryer')return L.state==='run'?st('part',`شغّالة · ${W(L.power)}`):st('wait','واقفة');
+    if(L.online===false)return st('no','مش متصل');if(!L.on)return st('wait','مطفي');
+    if(x.key==='geyser')return L.power>=HEATING?st('part',`عم يسخّن · ${W(L.power)}`):st('done','شغّال · مش عم يسخّن');
+    if(x.key==='living'&&L.power<HEATING)return st('wait','الكهربا واصلة · المكيف واقف');
+    return st('done',`شغّال · ${W(L.power)}`)};
+  const card=x=>{const L=x.live,ok=L&&L.online!==false;
+    const own=!L?'':x.key==='bedroom'?`${L.on?`${row('الوضع',esc(AC_MODES[L.mode]||L.mode||'—'))}${row('الدرجة المضبوطة',`${num(L.setpoint,0)}°`)}`:''}${L.temperature!=null?row('حرارة الغرفة',`${num(L.temperature,0)}°`):''}${L.humidity!=null?row('الرطوبة',`${num(L.humidity,0)}%`):''}`
+      :x.key==='dryer'?'':`${ok&&L.voltage!=null?row('الفولت',`<span dir="ltr">${num(L.voltage,1)} V</span>`):''}${(L.faults||[]).length?row('<span style="color:var(--red)">عطل</span>',esc(L.faults.map(f=>AC_FAULTS[f]||f).join('، '))):''}`;
+    const name=x.key==='dryer'?'':x.key==='geyser'?'الجيزر':'المكيف';
+    const ctl=!ok||!DEV_TARGET[x.key]?'':`<div style="display:flex;gap:8px;margin-top:10px">${x.key==='bedroom'&&L.on?`<button class="btn white" data-sp="-1" style="width:auto;padding:8px 16px" ${L.setpoint<=(L.min??16)?'disabled':''}>➖</button>
        <button class="btn white" data-sp="1" style="width:auto;padding:8px 16px" ${L.setpoint>=(L.max??30)?'disabled':''}>➕</button>`:''}
-       <button class="btn ${L.on?'white':''}" data-pw="${x.key}">${L.on?'⏻ طفّي المكيف':'⏻ شغّل المكيف'}</button></div>`;
-    return `<div class="card">${head}${own}${row('اليوم',`${num(x.d.today_kwh,2)} kWh`)}${row('هالشهر',`${num(x.d.month_kwh,2)} kWh`)}
-      ${L?`<p class="hint" style="margin:6px 0 0">آخر قراءة: <span dir="ltr">${esc(String(L.at||'').slice(0,16))}</span></p>`:'<p class="hint">ما في قراءة لسا.</p>'}${ctl}</div>`};
-  const first=list[0].d.month_first,price=list.map(x=>x.d.price_per_kwh).find(Boolean);
-  const days=[...new Set(list.flatMap(x=>x.d.daily.map(d=>d.day)))].sort().reverse();
-  const dayKwh=(x,day)=>(x.d.daily.find(d=>d.day===day)||{}).kwh||0;
-  const events=list.flatMap(x=>x.d.events.map(e=>({...e,ac:x}))).sort((a,c)=>String(c.at).localeCompare(String(a.at))).slice(0,15);
-  openSheet(`${head('❄️ المكيفات')}
-   <div class="kpis"><div class="kpi"><small>اليوم${list.length>1?' (الثنين)':''}</small><b class="num">${num(sum('today_kwh'),2)} kWh</b><small>${cost(costSum('today_cost'))}</small></div>
-    <div class="kpi"><small>هالشهر${first?` (من ${dmy(first).slice(0,5)})`:''}</small><b class="num">${num(sum('month_kwh'),2)} kWh</b><small>${cost(costSum('month_cost'))}</small></div></div>
-   ${list.map(card).join('')}
-   <div class="card"><div class="sub">اليوم حسب الساعة</div>${chart}</div>
-   ${days.length?`<div class="card"><div class="sub">هالشهر حسب اليوم</div>${days.map(day=>{const t=list.reduce((s,x)=>s+dayKwh(x,day),0);
-     return row(dmy(day),`${num(t,2)} kWh${price?' · '+money(t*price):''}${list.length>1?`<br><small class="hint">${list.map(x=>`${x.name} ${num(dayKwh(x,day),2)}`).join(' · ')}</small>`:''}`)}).join('')}</div>`:''}
-   ${events.length?`<div class="card"><div class="sub">شو صار</div>${events.map(e=>row(`<span style="color:${AC_COLOR[e.ac.key]}">●</span> ${esc(e.kind==='fault'?`عطل: ${AC_FAULTS[e.detail]||e.detail}`:e.kind==='phone'?phoneEvent(e.detail):AC_EVENTS[e.kind]||e.kind)}`,esc(String(e.at).slice(5,16)))).join('')}</div>`:''}
-   <p class="hint" style="text-align:center">${price?`التكلفة تقديرية بمعدّل سعر آخر فاتورة (${num(price*1000,1)} فلس/kWh). `:''}الأرقام من البوكس (Tuya لمكيف الصالون، وSmartThings لمكيف غرفة النوم). الأوامر من هون بتروح للبوكس عن طريق Drive وبتاخذ 10–20 ثانية.</p>`);
+       <button class="btn ${L.on?'white':''}" data-pw="${x.key}">${L.on?'⏻ طفّي '+name:'⏻ شغّل '+name}</button></div>`;
+    return `<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><b>${DEV_ICON[x.key]} ${EN_NAME[x.key]}</b>${status(x)}</div>
+      ${own}<p class="hint" style="margin:6px 0 0">اليوم <span dir="ltr">${num(x.today_kwh,2)}</span> · هالشهر <span dir="ltr">${num(x.month_kwh,2)}</span> kWh${L?.at?` · آخر قراءة ${esc(clock(L.at))}`:''}${x.key==='dryer'?' · قراءة بس، بدون تحكم':''}</p>${ctl}</div>`};
+  // Older lists (before device_events) still have the ACs' own events.
+  const events=(CAT.device_events||[...(CAT.breaker?.events||[]).map(e=>({...e,device:'living'})),...(CAT.samsung?.events||[]).map(e=>({...e,device:'bedroom'}))]
+    .sort((a,b)=>String(b.at).localeCompare(String(a.at)))).slice(0,15);
+  const what=e=>e.kind==='phone'?phoneEvent(e.detail):e.kind==='fault'?`عطل: ${AC_FAULTS[e.detail]||e.detail}`:AC_EVENTS[e.kind]||e.kind;
+  const today=devs.reduce((t,x)=>t+(x.today_kwh||0),0),y=window.scrollY;
+  openSheet(`${head('🏠 الأجهزة')}
+   <div class="card">${box}<button class="btn white" id="devRefresh" style="margin-top:10px">🔄 حدّث الحالة</button></div>
+   <div class="kpis"><div class="kpi"><small>اليوم</small><b class="num"><span dir="ltr">${num(today,2)} kWh</span></b></div>
+    <div class="kpi"><small>هالشهر</small><b class="num"><span dir="ltr">${num(en.month_kwh,2)} kWh</span></b></div></div>
+   ${devs.map(card).join('')}
+   ${events.length?`<div class="card"><div class="sub">شو صار</div>${events.map(e=>row(`${enDot(e.device)} ${EN_NAME[e.device]}: ${esc(what(e))}`,esc(when(e.at)))).join('')}</div>`:''}
+   <p class="hint" style="text-align:center">الحالة من البوكس، بيبعثها كل دقيقة وهو صاحي. الأوامر من هون بتروح للبوكس عن طريق Drive وبتاخذ 10–20 ثانية. الأرقام والرسومات بصفحة الطاقة.</p>`);
+  if(again)window.scrollTo(0,y);
   $('#closeSheet').onclick=closeSheet;
-  const name={living:'مكيف الصالون',bedroom:'مكيف غرفة النوم'};
-  sheet.querySelectorAll('[data-pw]').forEach(b=>b.onclick=()=>{const x=list.find(y=>y.key===b.dataset.pw),on=!x.d.live.on;
-    deviceCmd({target:x.key==='living'?'breaker':'samsung',kind:'power',value:on},`${on?'تشغّل':'تطفّي'} ${name[x.key]}؟`,`${on?'اشتغل':'انطفى'} ${name[x.key]} ✓`,acScreen)});
-  sheet.querySelectorAll('[data-sp]').forEach(b=>b.onclick=()=>{const L=CAT.samsung.live,v=Number(L.setpoint)+Number(b.dataset.sp);
-    deviceCmd({target:'samsung',kind:'setpoint',value:v},null,`صارت الدرجة ${v}° ✓`,acScreen)});
+  $('#devRefresh').onclick=e=>withBusy(e.currentTarget,()=>refreshDevices(true));
+  sheet.querySelectorAll('[data-pw]').forEach(b=>b.onclick=()=>{const x=devs.find(d=>d.key===b.dataset.pw),on=!x.live.on;
+    deviceCmd({target:DEV_TARGET[x.key],kind:'power',value:on},`${on?'تشغّل':'تطفّي'} ${EN_NAME[x.key]}؟`,`${on?'اشتغل':'انطفى'} ${EN_NAME[x.key]} ✓`,()=>devicesScreen(true))});
+  sheet.querySelectorAll('[data-sp]').forEach(b=>b.onclick=()=>{const L=devs.find(d=>d.key==='bedroom').live,v=Number(L.setpoint)+Number(b.dataset.sp);
+    deviceCmd({target:'samsung',kind:'setpoint',value:v},null,`صارت الدرجة ${v}° ✓`,()=>devicesScreen(true))});
+  if(!again)refreshDevices(false);
 }
 
 // ---------- energy: every appliance measured, in kWh (the computer's "Energy" page) ----------
@@ -350,7 +371,7 @@ function energyScreen(again=false){
   const y=window.scrollY;   // a tap on the history redraws the screen where it was
   const series=d.devices.filter(x=>EN.device==='all'||x.key===EN.device);
   const ps=enPeriods(d),idx=Math.max(0,ps.length-1-EN.back),p=ps[idx];
-  const items=p.hourly?[...Array(24).keys()].map(h=>({label:`الساعة ${h}:00`,tick:[0,6,12,18,23].includes(h)?String(h):'',parts:series.map(s=>(d.hourly[s.key]||[])[h]??null)}))
+  const items=p.hourly?[...Array(24).keys()].map(h=>({label:`الساعة ${hour12(h)}`,tick:[0,6,12,18,23].includes(h)?hour12(h):'',parts:series.map(s=>(d.hourly[s.key]||[])[h]??null)}))
     :p.items.map(it=>({...it,parts:series.map(s=>it.month?it.month[s.key]??null:enTotal(d.daily[s.key],it.from,it.to))}));
   const sums=items.map(x=>x.parts.reduce((t,v)=>t+(v||0),0)),tot=sums.reduce((a,b)=>a+b,0),top=Math.max(0.001,...sums);
   const counted=items.filter(x=>!x.future&&x.parts.some(v=>v!=null)).length,peak=sums.indexOf(Math.max(...sums));
@@ -384,8 +405,7 @@ function energyScreen(again=false){
       return `<div style="margin:10px 0"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
         <span>${enDot(x.key)} <b>${EN_NAME[x.key]}</b> ${live(x)}</span><span>${enKw(x.month_kwh)} <small class="hint" dir="ltr">${num(share,0)}%</small></span></div>
         <div style="height:8px;border-radius:9px;background:var(--border,#eef0f5);margin-top:6px;overflow:hidden"><div style="height:100%;width:${share}%;background:${EN_COLOR[x.key]}"></div></div>
-        <small class="hint">الشهر الماضي ${num(x.last_month_kwh,2)} · اليوم ${num(x.today_kwh,2)} kWh</small>
-        ${x.key==='geyser'&&x.live&&x.live.online!==false?`<button class="btn ${x.live.on?'white':''}" data-gy="${x.live.on?0:1}" style="margin-top:8px">${x.live.on?'⏻ طفّي الجيزر':'⏻ شغّل الجيزر'}</button>`:''}</div>`}).join('')}</div>
+        <small class="hint">الشهر الماضي ${num(x.last_month_kwh,2)} · اليوم ${num(x.today_kwh,2)} kWh</small></div>`}).join('')}</div>
    <div class="card"><div class="sub">السجل</div>
     <div class="seg" style="margin-bottom:6px">${tab('hourly','ساعة')}${tab('daily','يوم')}${tab('weekly','أسبوع')}${tab('monthly','شهر')}</div>
     <div class="seg">${chip('all','الكل')}${d.devices.map(x=>chip(x.key,short[x.key])).join('')}</div>
@@ -403,8 +423,6 @@ function energyScreen(again=false){
   sheet.querySelectorAll('[data-bar]').forEach(b=>b.onclick=()=>{const i=+b.dataset.bar;EN.sel=EN.sel===i?null:i;energyScreen(true)});
   $('#enOlder').onclick=()=>{EN.back++;EN.sel=null;energyScreen(true)};
   $('#enNewer').onclick=()=>{EN.back=Math.max(0,EN.back-1);EN.sel=null;energyScreen(true)};
-  $('[data-gy]')&&($('[data-gy]').onclick=e=>{const on=e.currentTarget.dataset.gy==='1';
-    deviceCmd({target:'geyser',kind:'power',value:on},on?'تشغّل الجيزر؟':'تطفّي الجيزر؟',on?'اشتغل الجيزر ✓':'انطفى الجيزر ✓',()=>energyScreen(true))});
 }
 
 // ---------- debts and installments: the details and every payment ----------
