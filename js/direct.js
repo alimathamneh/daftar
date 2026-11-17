@@ -306,8 +306,9 @@ function samsungSummary(s){
 
 // The energy dashboard (energy.summary): every appliance measured, in kWh. Days before the program measured one come
 // from SmartThings' own history (appliance_daily, counted only for days before it was copied). No money on purpose.
-const EN_MEASURED={living:['breaker_energy',"datetime(at,'-15 minutes')",''],bedroom:['samsung_energy','at',''],dryer:['appliance_energy','at',"AND device='dryer'"]};
-const EN_LIVE={living:'breaker_live',bedroom:'samsung_live',dryer:'dryer_live'};
+const EN_MEASURED={living:['breaker_energy',"datetime(at,'-15 minutes')",''],bedroom:['samsung_energy','at',''],dryer:['appliance_energy','at',"AND device='dryer'"],
+  geyser:['appliance_energy','at',"AND device='geyser'"]};
+const EN_LIVE={living:'breaker_live',bedroom:'samsung_live',dryer:'dryer_live',geyser:'geyser_live'};
 function energySummary(s){
   const has=t=>!!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name=?",[t]);
   const today=nowIso().slice(0,10),sd=monthStartDay(s),[first,last]=cycleOf(today,sd),[pf,pl]=cycleOf(addDays(first,-1),sd),from=addDays(today,-400);
@@ -323,7 +324,8 @@ function energySummary(s){
   const elapsed=diff(first,today)+1,sameEnd=[addDays(pf,elapsed-1),pl].sort()[0];
   const live=k=>{try{return JSON.parse((s.one('SELECT value FROM settings WHERE key=?',[EN_LIVE[k]])||{}).value||'null')}catch{return null}};
   const devices=[];
-  for(const key of Object.keys(EN_MEASURED)){const d=days[key]||{};if(!Object.keys(d).length&&key==='dryer')continue;
+  // The dryer shows once it has used something, the water heater once its breaker has been read (energy.summary).
+  for(const key of Object.keys(EN_MEASURED)){const d=days[key]||{};if(!Object.keys(d).length&&(key==='dryer'||key==='geyser'&&!live(key)))continue;
     devices.push({key,live:live(key),first_day:Object.keys(d)[0]||null,month_kwh:span(first,today,d),same_period_last_month_kwh:span(pf,sameEnd,d),
       last_month_kwh:span(pf,pl,d),today_kwh:d[today]??0})}
   const month=r(devices.reduce((t,x)=>t+x.month_kwh,0),3),months=[];
@@ -427,7 +429,7 @@ function mergeDevices(s,live){
   const has=t=>!!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name=?",[t]);
   for(const [t,cols] of Object.entries(LIVE_TABLES))if(has(t))
     for(const r of live.rows[t]||[])s.run(`INSERT OR IGNORE INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,r);
-  for(const t of ['breaker_events','samsung_events'])if(has(t))   // the computer numbers its own copies of these
+  for(const t of ['breaker_events','samsung_events','geyser_events'])if(has(t))   // the computer numbers its own copies of these
     for(const [at,kind,detail] of live.rows[t]||[])s.run(`INSERT INTO ${t}(at,kind,detail) SELECT ?,?,? WHERE NOT EXISTS(SELECT 1 FROM ${t} WHERE at=? AND kind=? AND detail=?)`,[at,kind,detail,at,kind,detail]);
   const at=v=>{try{return JSON.parse(v).at||(JSON.parse(v).pulled_at)||''}catch{return ''}};
   for(const [k,v] of Object.entries(live.live||{})){const cur=s.one('SELECT value FROM settings WHERE key=?',[k]);
