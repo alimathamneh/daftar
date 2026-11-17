@@ -338,6 +338,12 @@ function energySummary(s){
   return {today,month_start_day:sd,month_first:first,month_last:last,devices,month_kwh:month,
     same_period_last_month_kwh:r(devices.reduce((t,x)=>t+x.same_period_last_month_kwh,0),3),last_month_kwh:r(devices.reduce((t,x)=>t+x.last_month_kwh,0),3),
     estimate_kwh:elapsed?r(month/elapsed*(diff(first,last)+1),3):null,daily:Object.fromEntries(devices.map(x=>[x.key,days[x.key]||{}])),hourly,months:months.reverse()}}
+// What happened to every device, newest first, for the devices screen: {at, kind, detail, device}.
+const EVENT_TABLES={living:'breaker_events',bedroom:'samsung_events',geyser:'geyser_events'};
+function deviceEvents(s){
+  const has=t=>!!s.one("SELECT 1 x FROM sqlite_master WHERE type='table' AND name=?",[t]);
+  return Object.entries(EVENT_TABLES).filter(([,t])=>has(t)).flatMap(([device,t])=>s.all(`SELECT at,kind,detail FROM ${t} ORDER BY id DESC LIMIT 20`).map(e=>({...e,device})))
+    .sort((a,b)=>String(b.at).localeCompare(String(a.at))).slice(0,20)}
 
 // Each gas cylinder: last swap, days since, average days it lasts (phone_inbox.gas on the computer).
 function gasState(s){
@@ -390,7 +396,7 @@ async function catalogFrom(s,old){
   for(const x of [...meters.electricity,...meters.water]){delete x.tariff_snapshot;x.closed=!!periods.find(p=>p.id===x.period_id&&p.status==='closed')}
   const items=s.all('SELECT * FROM shopping_items WHERE deleted=0 ORDER BY in_cart,updated_at DESC');
   const reports={};for(const p of periods)if(p.status==='closed')reports[String(p.id)]=monthReport(s,p.id);
-  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,archived_obligations,names,categories,avg_use,gas:gasState(s),reports,breaker:breakerSummary(s),samsung:samsungSummary(s),energy:energySummary(s),
+  return {...old,source:'drive',generated_at:new Date().toISOString(),periods,expenses,readings,meters,summary,obligations,archived_obligations,names,categories,avg_use,gas:gasState(s),reports,breaker:breakerSummary(s),samsung:samsungSummary(s),energy:energySummary(s),device_events:deviceEvents(s),
     shopping:{items:items.filter(x=>!x.staple),staples:items.filter(x=>x.staple),names:s.all('SELECT DISTINCT name FROM shopping_items ORDER BY name').map(x=>x.name)},
     last_electricity:s.one('SELECT record_date,main_current,roof_current,car_current FROM electricity ORDER BY record_date DESC,id DESC LIMIT 1')||{},
     last_water:s.one('SELECT record_date,roof_current,total_consumption FROM water ORDER BY record_date DESC,id DESC LIMIT 1')||{},
@@ -452,7 +458,12 @@ async function lists(tok,key,old){
   const {root,headId}=await locate(tok);
   const [{db,zip},live]=await Promise.all([openCopy(tok,headId,key),devicesLive(tok,root,key)]);
   let catalog;try{const s=new Store(db);mergeDevices(s,live);catalog=await catalogFrom(s,old)}finally{db.close()}
+  if(live?.at)catalog.box_at=live.at;
   await keepPhotos(zip,catalog);return catalog}
+// Only the box's live file (a few KB), for the devices screen's refresh: the copy isn't opened.
+async function liveNow(tok,key){
+  const root=await findFolder(tok,'Home Monthly System');if(!root)throw new Error('ما لقيت مجلد البرنامج على Drive');
+  return devicesLive(tok,root,key)}
 // Apply `entries` straight into the Drive copy. Returns {applied:[ids], failed:{id:reason}, catalog}.
 // If the computer saved a copy at the same moment, start again once from its copy.
 async function run(tok,entries,key){
@@ -468,7 +479,7 @@ async function runOnce(tok,entries,key){
   if(!applied.length){db.close();return {applied,failed,catalog:null}}
   if(db.exec('PRAGMA integrity_check')[0].values[0][0]!=='ok')throw new Error('فحص قاعدة البيانات فشل، ما رفعت شي');
   zip.file('database/home_system.db',db.export(),{createFolders:false});
-  mergeDevices(s,await liveP);const catalog=await catalogFrom(s,CAT);db.close();await keepPhotos(zip,catalog);
+  const live=await liveP;mergeDevices(s,live);const catalog=await catalogFrom(s,CAT);db.close();if(live?.at)catalog.box_at=live.at;await keepPhotos(zip,catalog);
   const rev=crypto.randomUUID().replace(/-/g,''),manifest=JSON.parse(await zip.file('manifest.json').async('string'));
   zip.file('manifest.json',JSON.stringify({...manifest,format:3,revision:rev,parent_revision:head.revision,device_id:'iphone',created_at:new Date().toISOString()}));
   // The computer accepts only files in the archive (drive_sync.validate_snapshot): no folder entries.
@@ -508,9 +519,10 @@ async function command(tok,key,cmd,onSent){
 // The live state just brought back, put into the lists the screens show (catalogFrom's shapes).
 function applyLive(cat,live){
   if(!cat||!live?.live)return cat;const get=k=>{try{return JSON.parse(live.live[k]||'null')}catch{return null}};
-  const b=get('breaker_live'),s=get('samsung_live'),g=get('geyser_live');
+  const b=get('breaker_live'),s=get('samsung_live'),g=get('geyser_live'),dr=get('dryer_live');
   if(b&&cat.breaker)cat.breaker.live=b;if(s&&cat.samsung)cat.samsung.live={...cat.samsung.live,...s};
-  for(const x of cat.energy?.devices||[]){const v={living:b,bedroom:s,geyser:g}[x.key];if(v)x.live=v}
+  for(const x of cat.energy?.devices||[]){const v={living:b,bedroom:s,geyser:g,dryer:dr}[x.key];if(v)x.live=v}
+  if(live.at)cat.box_at=live.at;
   return cat}
 
 // ---------- shared shopping list (another person's phone, phone_inbox.exchange_shared_shopping on the computer) ----------
@@ -537,5 +549,5 @@ async function shopExchange(tok,key,cat){
   if(!listId||current!==await kvGet('shopPublished')){await putNamed(tok,folder,SHOP_LIST,listId,JSON.stringify({...(cat?.shopping||{}),updated_at:new Date().toISOString()}));await kvSet('shopPublished',current)}
   return cat}
 
-window.Direct={run,lists,salt,shopExchange,command,applyLive,calcElectric,calcWater,version,Store,Home,catalogFrom,libs};
+window.Direct={run,lists,liveNow,salt,shopExchange,command,applyLive,calcElectric,calcWater,version,Store,Home,catalogFrom,libs};
 })();
