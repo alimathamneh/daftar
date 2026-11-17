@@ -486,6 +486,33 @@ async function runOnce(tok,entries,key){
   gapi(tok,`https://www.googleapis.com/drive/v3/files/${head.blob_id}`,{method:'DELETE'}).catch(()=>{});
   return {applied,failed,catalog};
 }
+// ---------- switching devices through the TV box (server/hub.py DriveLive.take_commands) ----------
+// The command joins the recent ones in devices-commands.enc (encrypted like the copy); the box carries it out within
+// seconds, once, and only if it is under two minutes old. Its outcome comes back in the live file under 'commands'.
+const CMD_FILE='devices-commands.enc',CMD_WAIT=60000;
+async function command(tok,key,cmd,onSent){
+  const root=await findFolder(tok,'Home Monthly System');if(!root)throw new Error('ما لقيت مجلد البرنامج على Drive');
+  const f=(await driveFiles(tok,`name = '${CMD_FILE}' and '${root}' in parents and trashed = false`))[0];
+  let list=[];if(f){try{list=JSON.parse(new TextDecoder().decode(await decryptBytes(key.raw,new Uint8Array(await (await gapi(tok,`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`)).arrayBuffer())))).commands||[]}catch{}}
+  const now=Date.now(),c={id:crypto.randomUUID().replace(/-/g,''),at:now,target:cmd.target,kind:cmd.kind,value:cmd.value};
+  list=[...list.filter(x=>now-Number(x.at)<600000),c].slice(-20);
+  const body=await encryptBytes(key.raw,new TextEncoder().encode(JSON.stringify({commands:list})));
+  if(f)await gapi(tok,`https://www.googleapis.com/upload/drive/v3/files/${f.id}?uploadType=media`,{method:'PATCH',headers:{'Content-Type':'application/octet-stream'},body});
+  else{const boundary='hm'+Math.random().toString(36).slice(2);
+    await gapi(tok,'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+boundary},
+      body:new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({name:CMD_FILE,parents:[root]})}\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`,body,`\r\n--${boundary}--`])})}
+  if(onSent)onSent();
+  while(Date.now()-now<CMD_WAIT){await new Promise(ok=>setTimeout(ok,3000));
+    const live=await devicesLive(tok,root,key),r=live?.commands?.[c.id];if(r)return {...r,live}}
+  return {status:'waiting'}}
+// The live state just brought back, put into the lists the screens show (catalogFrom's shapes).
+function applyLive(cat,live){
+  if(!cat||!live?.live)return cat;const get=k=>{try{return JSON.parse(live.live[k]||'null')}catch{return null}};
+  const b=get('breaker_live'),s=get('samsung_live'),g=get('geyser_live');
+  if(b&&cat.breaker)cat.breaker.live=b;if(s&&cat.samsung)cat.samsung.live={...cat.samsung.live,...s};
+  for(const x of cat.energy?.devices||[]){const v={living:b,bedroom:s,geyser:g}[x.key];if(v)x.live=v}
+  return cat}
+
 // ---------- shared shopping list (another person's phone, phone_inbox.exchange_shared_shopping on the computer) ----------
 // A separate folder holds only item names; the other phone writes its changes to one file and reads the list from another.
 const SHOP_FOLDER='Home Monthly Shopping',SHOP_LIST='shopping-list.json',SHOP_INBOX='shopping-changes.json';
@@ -510,5 +537,5 @@ async function shopExchange(tok,key,cat){
   if(!listId||current!==await kvGet('shopPublished')){await putNamed(tok,folder,SHOP_LIST,listId,JSON.stringify({...(cat?.shopping||{}),updated_at:new Date().toISOString()}));await kvSet('shopPublished',current)}
   return cat}
 
-window.Direct={run,lists,salt,shopExchange,calcElectric,calcWater,version,Store,Home,catalogFrom,libs};
+window.Direct={run,lists,salt,shopExchange,command,applyLive,calcElectric,calcWater,version,Store,Home,catalogFrom,libs};
 })();
