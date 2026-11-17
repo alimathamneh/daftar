@@ -288,8 +288,8 @@ function acScreen(){
 }
 
 // ---------- energy: every appliance measured, in kWh (the computer's "Energy" page) ----------
-const EN_NAME={living:'مكيف الصالون',bedroom:'مكيف غرفة النوم',dryer:'النشافة'};
-const EN_COLOR={living:'var(--brand,#5b5cf0)',bedroom:'#0ea5a4',dryer:'#f59e0b'};
+const EN_NAME={living:'مكيف الصالون',bedroom:'مكيف غرفة النوم',dryer:'النشافة',geyser:'الجيزر'};
+const EN_COLOR={living:'var(--brand,#5b5cf0)',bedroom:'#0ea5a4',dryer:'#f59e0b',geyser:'#e11d48'};
 const EN={tab:'daily',device:'all',back:0,sel:null};   // back = how many periods before the current one; sel = the bar tapped
 const enKw=v=>`<span dir="ltr">${num(v||0,2)} kWh</span>`;
 const enDay=s=>new Date(s+'T00:00:00'),enIso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -339,11 +339,13 @@ function energyScreen(again=false){
       ${series.length>1?`<br><small class="hint">${series.map((s,j)=>`${enDot(s.key)} ${EN_NAME[s.key]} ${items[sel].parts[j]==null?'—':num(items[sel].parts[j],2)}`).join(' · ')}</small>`:''}</div>`;
   const diff=d.month_kwh-d.same_period_last_month_kwh,most=[...d.devices].sort((a,b)=>b.month_kwh-a.month_kwh)[0],today=d.devices.reduce((t,x)=>t+(x.today_kwh||0),0);
   const live=x=>{const L=x.live;if(!L)return '';if(x.key==='dryer')return L.state==='run'?`<span class="st part">شغّالة · ${num(L.power,0)} W</span>`:'';
+    // The water heater's breaker stays on while its thermostat has it idle: heating only above a few watts.
+    if(x.key==='geyser')return L.online===false?'':!L.on?'<span class="st no">مطفي</span>':L.power>=50?`<span class="st wait">عم يسخّن · ${num(L.power,0)} W</span>`:'<span class="st done">شغّال</span>';
     // The breaker stays on with the AC on standby (a few watts): only real use counts as running.
     return L.online!==false&&L.on&&(x.key!=='living'||L.power>=50)?`<span class="st done">شغّال · ${num(L.power,0)} W</span>`:''};
   const tab=(k,l)=>`<button type="button" class="${EN.tab===k?'on':''}" data-tab="${k}">${l}</button>`;
   const chip=(k,l)=>`<button type="button" class="${EN.device===k?'on':''}" data-dev="${k}" style="font-size:12.5px;padding:8px 4px">${k!=='all'?enDot(k)+' ':''}${l}</button>`;
-  const short={living:'الصالون',bedroom:'غرفة النوم',dryer:'النشافة'};
+  const short={living:'الصالون',bedroom:'غرفة النوم',dryer:'النشافة',geyser:'الجيزر'};
   openSheet(`${head('⚡ الطاقة')}
    <div class="kpis"><div class="kpi"><small>هالشهر (<bdi dir="ltr">${enDm(d.month_first)} – ${enDm(d.month_last)}</bdi>)</small><b class="num">${enKw(d.month_kwh)}</b>
       <small>${d.same_period_last_month_kwh||d.month_kwh?`<span style="color:${diff>0?'var(--red)':'var(--green)'}">${diff>0?'▲':'▼'} ${num(Math.abs(diff),2)}</span> ${diff>0?'أكثر':'أقل'} من نفس الأيام بالشهر الماضي`:''}</small></div>
